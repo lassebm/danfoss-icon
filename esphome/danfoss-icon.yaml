@@ -20,7 +20,7 @@ esp32:
     type: esp-idf
 
 logger:
-# level: DEBUG
+  # level: DEBUG
 
 api:
 
