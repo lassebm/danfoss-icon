@@ -19,6 +19,9 @@ esp32:
   framework:
     type: esp-idf
 
+logger:
+# level: DEBUG
+
 api:
 
 ota:
@@ -28,8 +31,6 @@ wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
 
-web_server:
-
 external_components:
   # To deploy from the published component, comment the local source below and uncomment this:
   # - source: github://lassebm/danfoss-icon@main
@@ -38,9 +39,6 @@ external_components:
       type: local
       path: components
 
-logger:
-  level: DEBUG
-
 uart:
   id: controller_uart
   tx_pin: GPIO3
@@ -48,15 +46,7 @@ uart:
   baud_rate: 115200
 
 danfoss_icon:
-  id: icon
   uart_id: controller_uart
-  poll_interval: 2s
-  # force_manual: true
-  # connection_timeout: 15s
-  # secondary_controllers:
-  #   - number: 2
-  #     name: "Garage Controller"
-  #     device_id: dev_secondary1
   rooms:
     - number: 1
       name: "Kitchen"
