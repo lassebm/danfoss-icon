@@ -123,6 +123,14 @@ this repository.
   firmware-update commands the original App Module uses, and it cannot flash the controller.
 - Provided **as-is, without warranty of any kind**. See [LICENSE](LICENSE).
 
+## AI usage
+
+AI was used extensively across this project — to help work through the protocol and to write the
+ESPHome component, the host tests, and this documentation. None of it is guesswork: everything is
+grounded in the reverse-engineering described above (see
+[How it was reverse-engineered](#how-it-was-reverse-engineered)) and validated against real
+hardware.
+
 ## License
 
 [MIT](LICENSE).
