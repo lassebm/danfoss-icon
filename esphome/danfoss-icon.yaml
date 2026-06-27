@@ -1,0 +1,72 @@
+# Danfoss Icon App Module emulator (ESP32-C3). Hardware wiring, power safety, flashing, and
+# configuration are documented in docs/ (HARDWARE.md / INSTALL.md).
+
+esphome:
+  name: danfoss-icon
+  friendly_name: "Danfoss Icon"
+  devices:
+    - id: dev_kitchen
+      name: "Kitchen"
+    - id: dev_bedroom
+      name: "Bedroom"
+    - id: dev_entrance
+      name: "Entrance"
+    - id: dev_bathroom
+      name: "Bathroom"
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+web_server:
+
+external_components:
+  # To deploy from the published component, comment the local source below and uncomment this:
+  # - source: github://lassebm/danfoss-icon@main
+  #   components: [danfoss_icon]
+  - source:
+      type: local
+      path: components
+
+logger:
+  level: DEBUG
+
+uart:
+  id: controller_uart
+  tx_pin: GPIO3
+  rx_pin: GPIO4
+  baud_rate: 115200
+
+danfoss_icon:
+  id: icon
+  uart_id: controller_uart
+  poll_interval: 2s
+  # force_manual: true
+  # connection_timeout: 15s
+  # secondary_controllers:
+  #   - number: 2
+  #     name: "Garage Controller"
+  #     device_id: dev_secondary1
+  rooms:
+    - number: 1
+      name: "Kitchen"
+      device_id: dev_kitchen
+    - number: 2
+      name: "Bedroom"
+      device_id: dev_bedroom
+    - number: 3
+      name: "Entrance"
+      device_id: dev_entrance
+    - number: 4
+      name: "Bathroom"
+      device_id: dev_bathroom
