@@ -36,7 +36,7 @@ class DanfossIconClimate : public climate::Climate, public Component, public Dan
 
   DanfossIconHub *parent_{nullptr};
   uint8_t idx_{0};
-  uint8_t op_mode_{0};       // 0x030A floor-sensor mode: 0=Comfort, 1=Floor, 2=Dual
+  uint8_t floor_mode_{0};    // 0x030A floor-sensor mode: 0=Comfort, 1=Floor, 2=Dual
   float room_temp_{NAN};     // 0x0300
   float floor_temp_{NAN};    // 0x0304
   float saved_target_{NAN};  // last heat setpoint, restored when leaving OFF (persisted to flash)
@@ -48,8 +48,7 @@ class DanfossIconClimate : public climate::Climate, public Component, public Dan
   ESPPreferenceObject saved_target_pref_;  // NVS persistence for saved_target_ (survives reboot)
   ESPPreferenceObject room_min_pref_;      // NVS persistence for room_min_
   ESPPreferenceObject room_max_pref_;      // NVS persistence for room_max_
-  // Last-published snapshot for publish_if_changed_() — avoids re-emitting the full climate state
-  // every fast poll (~2 s) when nothing moved. HA gets the stored state again on API (re)connect.
+  // Last-published snapshot, compared by publish_if_changed_().
   climate::ClimateMode last_mode_{};
   climate::ClimateAction last_action_{};
   float last_target_{NAN};

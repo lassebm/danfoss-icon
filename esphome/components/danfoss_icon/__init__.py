@@ -130,29 +130,31 @@ CONF_DISCOVER_BUTTON_ID = "discover_button_id"
 # (1 = the primary controller this node is wired to; 2/3 = secondary controllers it aggregates).
 ROOM_IDX_BASE = 0x31
 SLOTS_PER_CONTROLLER = 15
-ROOM_BATTERY_ATTR = 0x030F
-ROOM_MODEL_ATTR = 0x0080
-ROOM_FIRMWARE_ATTR = 0x007F
+ROOM_BATTERY_ATTR = 0x030F  # thermostat battery %
+ROOM_MODEL_ATTR = 0x0080  # device descriptor (carries the product id)
+ROOM_FIRMWARE_ATTR = 0x007F  # device firmware version string
 ROOM_TEMP_ATTR = 0x0300  # room air temperature
-ROOM_FLOOR_ATTR = 0x0304
-ROOM_OPMODE_ATTR = 0x030A
-# Per-room setpoint lower limit (menu-configurable)
-ROOM_SETPOINT_MIN_ATTR = 0x0507
-# Per-room setpoint upper limit (menu-configurable)
-ROOM_SETPOINT_MAX_ATTR = 0x0508
-# Floor temperature lower clamp limit
-ROOM_FLOOR_MIN_ATTR = 0x050C
-# Floor temperature upper (overheat) clamp limit
-ROOM_FLOOR_MAX_ATTR = 0x050D
-ROOM_OUTPUTS_ATTR = 0x1020
-ROOM_ERRORCODE_ATTR = 0x03F0
-CONTROLLER_REVISION_ATTR = 0x0015
-CONTROLLER_FIRMWARE_ATTR = 0x007F
+ROOM_SETPOINT_ATTR = 0x0509  # active/home setpoint (the HA target)
+ROOM_HEATCOOL_ATTR = 0x1013  # heating/cooling state (climate action)
+ROOM_FLOOR_TEMP_ATTR = 0x0304  # floor temperature
+ROOM_FLOOR_MODE_ATTR = 0x030A  # floor-sensor mode: Comfort/Floor/Dual
+ROOM_SETPOINT_MIN_ATTR = 0x0507  # per-room setpoint lower limit (menu-configurable)
+ROOM_SETPOINT_MAX_ATTR = 0x0508  # per-room setpoint upper limit (menu-configurable)
+ROOM_FLOOR_MIN_ATTR = 0x050C  # floor temperature lower clamp limit
+ROOM_FLOOR_MAX_ATTR = 0x050D  # floor temperature upper (overheat) clamp limit
+# Output actuator state is three per-controller speed-category bitmaps; the Outputs text sensor
+# reads the union (see DI_TEXT_OUTPUTS), so all three must be polled together.
+ROOM_OUTPUTS_ATTR = 0x1020  # output bitmap, SLOW group
+ROOM_OUTPUTS_MED_ATTR = 0x1021  # output bitmap, MEDIUM group
+ROOM_OUTPUTS_FAST_ATTR = 0x1022  # output bitmap, FAST group
+ROOM_ERRORCODE_ATTR = 0x03F0  # fault/error-code bitmask
+CONTROLLER_REVISION_ATTR = 0x0015  # hardware + software revision (u16 each)
+CONTROLLER_FIRMWARE_ATTR = 0x007F  # firmware version string
 # The GLOBAL idx0 identity (serial 0x0016, etc.) describes only the PRIMARY controller (the one the
 # emulator is wired to = rail idx 1); secondary controllers 2/3 expose only their per-rail identity.
-# So serial is a primary-controller entity, read from idx0. Polled in the idx0 identity bulk.
-GLOBAL_IDX = 0x00
-SYSTEM_SERIAL_ATTR = 0x0016
+# So serial is a primary-controller entity, read from idx0 (polled only when the Serial entity is on).
+GLOBAL_IDX = 0x00  # global / system identity slot
+SYSTEM_SERIAL_ATTR = 0x0016  # controller serial number
 
 
 def _room_index(room):
@@ -346,15 +348,18 @@ async def _new_room_climate(hub, room, name, device_id):
     var = await climate_.new_climate(cfg)
     await cg.register_component(var, cfg)
     cg.add(var.set_parent(hub))
-    cg.add(var.set_room_index(_room_index(room)))
-    # current_temperature follows the regulation sensor (0x030A); for floor mode it uses floor
-    # temp (0x0304). Both slow-polled so the climate can pick (room temp 0x0300 is in the fast set).
-    cg.add(hub.add_room_poll_attr(_room_index(room), ROOM_OPMODE_ATTR))
-    cg.add(hub.add_room_poll_attr(_room_index(room), ROOM_FLOOR_ATTR))
+    idx = _room_index(room)
+    cg.add(var.set_room_index(idx))
+    # Live climate values — fast tier: air temp, active setpoint, heat/cool state. (Floor temp, the
+    # current_temperature source in Floor mode, is registered fast by the floor feature set below;
+    # the regulation-mode selector 0x030A is polled there too, gated to floor rooms.)
+    cg.add(hub.add_fast_attr(idx, ROOM_TEMP_ATTR))
+    cg.add(hub.add_fast_attr(idx, ROOM_SETPOINT_ATTR))
+    cg.add(hub.add_fast_attr(idx, ROOM_HEATCOOL_ATTR))
     # Per-room setpoint min/max (0x0507/0x0508) drive the climate's visual bounds + clamp. Slow tier
     # (rarely change — only via thermostat menu/app); HA picks up new visual bounds on reconnect.
-    cg.add(hub.add_room_poll_attr(_room_index(room), ROOM_SETPOINT_MIN_ATTR))
-    cg.add(hub.add_room_poll_attr(_room_index(room), ROOM_SETPOINT_MAX_ATTR))
+    cg.add(hub.add_slow_attr(idx, ROOM_SETPOINT_MIN_ATTR))
+    cg.add(hub.add_slow_attr(idx, ROOM_SETPOINT_MAX_ATTR))
 
 
 async def _new_room_battery(hub, room, name, device_id):
@@ -396,10 +401,9 @@ async def _new_room_floor(hub, room, name, device_id):
     await cg.register_component(var, cfg)
     cg.add(var.set_parent(hub))
     cg.add(var.set_index(_room_index(room)))
-    cg.add(var.set_attribute(ROOM_FLOOR_ATTR))
+    cg.add(var.set_attribute(ROOM_FLOOR_TEMP_ATTR))
     cg.add(var.set_decode(DiSensorDecode.DI_DECODE_TEMP))
-    # Floor isn't in the static fast set (off by default) — poll it only when enabled.
-    cg.add(hub.add_room_poll_attr(_room_index(room), ROOM_FLOOR_ATTR))
+    # The sensor's setup() registers 0x0304 (slow); the floor feature set upgrades it to fast.
 
 
 async def _new_room_temp(hub, room, name, device_id):
@@ -418,8 +422,8 @@ async def _new_room_temp(hub, room, name, device_id):
 
 
 async def _new_room_fault(hub, room, prefix, device_id):
-    # `fault` makes two entities (Problem alarm + Fault text), both reading 0x03F0 — so the
-    # poll is registered once here, not per entity.
+    # `fault` makes two entities (Problem alarm + Fault text), both reading 0x03F0; the Fault text
+    # sensor's setup() registers the poll, which the Problem binary piggybacks on.
     idx = _room_index(room)
     await _new_problem(
         hub, room[CONF_ROOM_PROBLEM_ID], f"{prefix}Problem", idx, device_id
@@ -431,7 +435,6 @@ async def _new_room_fault(hub, room, prefix, device_id):
     cg.add(var.set_index(idx))
     cg.add(var.set_attribute(ROOM_ERRORCODE_ATTR))
     cg.add(var.set_decode(DiTextDecode.DI_TEXT_FAULT_ROOM))
-    cg.add(hub.add_room_poll_attr(idx, ROOM_ERRORCODE_ATTR))
 
 
 async def _new_problem(hub, id_obj, name, index, device_id=None):
@@ -528,12 +531,20 @@ async def to_code(config):
                 DiTextDecode.DI_TEXT_OUTPUTS,
                 dev,
             )
+            # The text sensor unions all three speed-group bitmaps. Its setup() registers the base
+            # group (0x1020); register the other two so the whole union is polled.
+            cg.add(var.add_slow_attr(idx, ROOM_OUTPUTS_MED_ATTR))
+            cg.add(var.add_slow_attr(idx, ROOM_OUTPUTS_FAST_ATTR))
         if room[CONF_FAULT]:
             await _new_room_fault(var, room, prefix, dev)
         # Floor feature set — only when a floor sensor is fitted (floor: true). Per the thermostat
         # guide, the floor min/max apply in Comfort and Dual modes; the mode itself is only
         # meaningful with a floor sensor, so all three entities are gated together here.
         if room[CONF_FLOOR]:
+            # Floor temp is the displayed current_temperature in Floor mode -> fast tier (upgrades
+            # the floor sensor's default slow registration). The mode selector 0x030A is polled slow
+            # by the Floor Sensor Mode text sensor below; both are thus gated to floor rooms.
+            cg.add(var.add_fast_attr(idx, ROOM_FLOOR_TEMP_ATTR))
             await _new_room_floor(var, room, f"{prefix}Floor", dev)
             # Air temp as its own sensor so Floor mode (climate current = floor) doesn't hide it.
             await _new_room_temp(var, room, f"{prefix}Room Temperature", dev)
@@ -542,8 +553,8 @@ async def to_code(config):
                 room[CONF_FLOOR_MODE_ID],
                 f"{prefix}Floor Sensor Mode",
                 idx,
-                ROOM_OPMODE_ATTR,
-                DiTextDecode.DI_TEXT_REGSENSOR,
+                ROOM_FLOOR_MODE_ATTR,
+                DiTextDecode.DI_TEXT_FLOOR_MODE,
                 dev,
             )
             await _new_room_setpoint_limit(
@@ -602,7 +613,6 @@ async def to_code(config):
             SYSTEM_SERIAL_ATTR,
             DiTextDecode.DI_TEXT_SERIAL,
         )
-        cg.add(var.add_room_poll_attr(GLOBAL_IDX, SYSTEM_SERIAL_ATTR))
     if config[CONF_FAULT]:
         await _new_problem(var, config[CONF_CTRL_PROBLEM_ID], "Problem", 1)
         await _new_text(
@@ -613,7 +623,6 @@ async def to_code(config):
             ROOM_ERRORCODE_ATTR,
             DiTextDecode.DI_TEXT_FAULT_RAIL,
         )
-        cg.add(var.add_room_poll_attr(1, ROOM_ERRORCODE_ATTR))
     ccfg = _GEN_CONN_SCHEMA(_cfg(config[CONF_CTRL_CONN_ID], "Connection", None))
     conn = await binary_sensor_.new_binary_sensor(ccfg)
     cg.add(var.set_link_sensor(conn))
@@ -668,4 +677,3 @@ async def to_code(config):
                 DiTextDecode.DI_TEXT_FAULT_RAIL,
                 dev,
             )
-            cg.add(var.add_room_poll_attr(idx, ROOM_ERRORCODE_ATTR))

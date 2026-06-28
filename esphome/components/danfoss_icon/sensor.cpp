@@ -9,11 +9,11 @@ static const char *const TAG = "danfoss_icon.sensor";
 
 void DanfossIconSensor::setup() {
   parent_->add_listener(this);
-  if (idx_ >= 0x31) {  // room-scoped attrs need the room polled; idx0 identity is always polled
+  if (idx_ >= 0x31)
     parent_->add_room(idx_);
-    parent_->add_room_poll_attr(idx_, attr_);  // poll this attr (slow tier) so non-standard ids refresh
-  } else if (idx_ >= 0x01 && idx_ <= 0x03)
+  else if (idx_ >= 0x01 && idx_ <= 0x03)
     parent_->add_controller(idx_);
+  parent_->add_slow_attr(idx_, attr_);  // poll this attr (slow tier); tier/dedup resolved at build
 }
 
 void DanfossIconSensor::on_attr(uint8_t idx, uint16_t attr_id, const uint8_t *data, size_t len) {

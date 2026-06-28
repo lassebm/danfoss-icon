@@ -14,6 +14,7 @@ void DanfossIconTextSensor::setup() {
     parent_->add_room(idx_);
   else if (idx_ >= 0x01 && idx_ <= 0x03)
     parent_->add_controller(idx_);
+  parent_->add_slow_attr(idx_, attr_);  // poll this attr (slow tier); tier/dedup resolved at build
 }
 
 void DanfossIconTextSensor::on_attr(uint8_t idx, uint16_t attr_id, const uint8_t *data, size_t len) {
@@ -26,14 +27,14 @@ void DanfossIconTextSensor::on_attr(uint8_t idx, uint16_t attr_id, const uint8_t
       return;
     uint16_t bm = ((uint16_t) data[0] << 8) | data[1];
     if (attr_id == 0x1020)
-      og_slow_ = bm;
+      out_slow_ = bm;
     else if (attr_id == 0x1021)
-      og_med_ = bm;
+      out_med_ = bm;
     else if (attr_id == 0x1022)
-      og_fast_ = bm;
+      out_fast_ = bm;
     else
       return;
-    uint16_t all = og_slow_ | og_med_ | og_fast_;
+    uint16_t all = out_slow_ | out_med_ | out_fast_;
     std::string list;
     // "#"-prefix each channel so a single value reads as a channel id, not a count
     // (e.g. "#2" = output channel 2, never "2 outputs").
@@ -135,7 +136,7 @@ void DanfossIconTextSensor::on_attr(uint8_t idx, uint16_t attr_id, const uint8_t
         out = "OK";
       break;
     }
-    case DI_TEXT_REGSENSOR:  // 0x030A floor-sensor mode (1 byte)
+    case DI_TEXT_FLOOR_MODE:  // 0x030A floor-sensor mode (1 byte)
       if (len >= 1)
         out = data[0] == 0   ? "Comfort"  // room+floor: regulate air, floor min holds comfort
               : data[0] == 1 ? "Floor"    // regulate on floor sensor; setpoint is the floor target

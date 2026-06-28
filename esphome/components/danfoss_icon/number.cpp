@@ -10,11 +10,11 @@ static const char *const TAG = "danfoss_icon.number";
 
 void DanfossIconNumber::setup() {
   parent_->add_listener(this);
-  if (idx_ >= 0x31) {  // room-scoped: ensure the room is polled, and poll this attr (slow tier)
+  if (idx_ >= 0x31)
     parent_->add_room(idx_);
-    parent_->add_room_poll_attr(idx_, attr_);
-  } else if (idx_ >= 0x01 && idx_ <= 0x03)
+  else if (idx_ >= 0x01 && idx_ <= 0x03)
     parent_->add_controller(idx_);
+  parent_->add_slow_attr(idx_, attr_);  // poll this attr (slow tier); tier/dedup resolved at build
 }
 
 void DanfossIconNumber::on_attr(uint8_t idx, uint16_t attr_id, const uint8_t *data, size_t len) {

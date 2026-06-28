@@ -134,19 +134,12 @@ inline size_t attr_value_size(uint16_t attr_id) {
     case 0x107B:
     case 0x107D:
       return 2;
-    // 2-byte rail output counts/bitmaps
-    case 0x7040:
-    case 0x7041:
-      return 2;
     // 1-byte: enums / flags / percent
     case 0x030A:
-    case 0x030C:
     case 0x030F:
     case 0x100A:
     case 0x100B:
     case 0x1013:
-    case 0x1008:
-    case 0x1200:
     case 0x1201:
     case 0x1100:
     case 0x1101:
@@ -198,7 +191,7 @@ inline const char *status_name(uint8_t status) {
   }
 }
 
-// Per-room thermostat product id (device_descriptor 0x0080 bytes [1:2], u16 BE).
+// Per-room thermostat product id (device_descriptor 0x0080 bytes [4:5], u16 BE).
 // 0x8030 confirmed on hardware; the rest are from the product range.
 inline const char *product_id_name(uint16_t pid) {
   switch (pid) {

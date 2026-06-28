@@ -40,6 +40,14 @@ struct WriteReq {
   std::vector<uint8_t> value;
 };
 
+// One poll registration from an entity: poll (attr) on (idx) at the fast or slow tier.
+// build_poll_list_ groups these by idx and de-dups; an attr registered on both tiers polls fast.
+struct PollReg {
+  uint8_t idx;
+  uint16_t attr;
+  bool fast;
+};
+
 // The transaction currently on the wire (awaiting a 0x0D reply).
 struct InFlight {
   bool is_write{false};
@@ -60,11 +68,13 @@ class DanfossIconHub : public Component, public uart::UARTDevice {
   float get_setup_priority() const override { return setup_priority::DATA; }
 
   // Config + entity registration.
-  void add_room(uint8_t idx);        // dedup; rooms polled for the standard room attr set
-  void add_controller(uint8_t idx);  // dedup; controllers (rail idx 1-3) polled for identity attrs
-  // Add an extra slow-tier attribute to a room's poll (e.g. an away/asleep setpoint number),
-  // so we poll exactly what configured entities need.
-  void add_room_poll_attr(uint8_t idx, uint16_t attr) { extra_room_attrs_.push_back({idx, attr}); }
+  void add_room(uint8_t idx);        // dedup; tracks polled rooms for the dump_config summary
+  void add_controller(uint8_t idx);  // dedup; tracks polled controllers for the dump_config summary
+  // Register an attribute for polling on (idx), at the fast (poll_interval) or slow (60 s) tier.
+  // Entities call these for exactly what they consume; build_poll_list_ groups by idx and de-dups
+  // (an attr registered on both tiers polls fast). Nothing is polled that no entity registered.
+  void add_fast_attr(uint8_t idx, uint16_t attr) { poll_regs_.push_back({idx, attr, true}); }
+  void add_slow_attr(uint8_t idx, uint16_t attr) { poll_regs_.push_back({idx, attr, false}); }
   void set_poll_interval(uint32_t ms) { poll_interval_ms_ = ms; }
   void set_reply_timeout(uint32_t ms) { reply_timeout_ms_ = ms; }
   void add_listener(DanfossIconListener *l) { listeners_.push_back(l); }
@@ -101,10 +111,12 @@ class DanfossIconHub : public Component, public uart::UARTDevice {
 
   std::vector<uint8_t> rooms_;
   std::vector<uint8_t> controllers_;
-  std::vector<std::pair<uint8_t, uint16_t>> extra_room_attrs_;  // (idx, attr) extra slow polls
+  std::vector<PollReg> poll_regs_;  // (idx, attr, tier) registrations from entities -> poll_list_
   std::vector<PollItem> poll_list_;
   std::vector<PollItem> discovery_;
   std::vector<std::string> disc_inventory_;  // decoded lines, replayed by dump_config()
+  std::vector<std::string> yaml_pending_;    // print_yaml() output, drained a few lines/loop
+  size_t yaml_idx_{0};                       // next yaml_pending_ line to log
   std::vector<uint8_t> disc_rooms_;          // present room idxs (for print_yaml)
   std::vector<uint8_t> disc_floor_rooms_;    // subset of disc_rooms_ with a floor sensor fitted
   std::vector<uint8_t> disc_controllers_;    // present controller idxs (for print_yaml)

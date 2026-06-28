@@ -130,9 +130,9 @@ The `idx` byte of a command (shown in the frame layout above) selects which enti
 | `0x04–0x30` | actuator outputs |
 | **`0x31–0x5D`** | **room thermostats** — Room *n* on controller *c* is `0x31 + (c-1)*15 + (n-1)` |
 
-The **same attribute ID means different things depending on the entity class** — e.g. `0x0300`
-is a room attribute, `0x030C` an output attribute. Always treat an attribute as the pair
-(index-class, attribute-id).
+The **same attribute ID means different things depending on the entity class** — e.g. `0x03F0` is
+a room-fault bitmask on a room and a rail/system-fault bitmask on a controller. Always treat an
+attribute as the pair (index-class, attribute-id).
 
 ## Value encoding
 
@@ -188,12 +188,5 @@ different things per class, so read each table as `(class, attribute)`.
 | `0x03F0` | error code | 16-bit fault bitmask (rail/system faults) |
 | `0x0016` | serial number | `u32`, global idx 0 — describes the primary controller |
 
-**Output** (idx `0x04`–`0x30`) — read during the boot discovery probe and logged, **not** turned
-into entities:
-
-| Attribute | Meaning | Notes |
-| --- | --- | --- |
-| `0x1008` | output used-by-room | which room the actuator channel serves |
-| `0x1200` | output state (auto) | algorithm-driven on/off |
-| `0x030C` | output duty cycle | percent |
-| `0x7040` / `0x7041` | rail outputs available / in-use | bitmaps |
+Outputs (idx `0x04`–`0x30`) are actuator channels on the wire but aren't polled — a room's served
+channels come from its own output-group bitmaps (`0x1020`/`0x1021`/`0x1022` above).

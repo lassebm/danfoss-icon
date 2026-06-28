@@ -10,36 +10,25 @@ namespace danfoss_icon {
 
 static const char *const TAG = "danfoss_icon";
 
-// Tiered per-room poll. FAST = live climate values (temp, active setpoint, heat/cool state) at
-// poll_interval_; SLOW = slowly-changing state (identity descriptor/model, fw, battery %, output
-// bitmaps), re-read occasionally (self-heals a thermostat asleep at boot). Battery and fault sit on
-// the slow tier deliberately — they change on the scale of days / hardware events, not seconds.
-// Optional attrs (floor 0x0304, away/asleep, fault 0x03F0) are polled only when their entity is
-// enabled, via add_room_poll_attr() — so we never poll what nothing consumes.
-static const uint16_t ROOM_FAST[] = {0x0300, 0x0509, 0x1013};
-static const size_t ROOM_FAST_N = sizeof(ROOM_FAST) / sizeof(ROOM_FAST[0]);
-static const uint16_t ROOM_SLOW[] = {0x0080, 0x007F, 0x030F, 0x1020, 0x1021, 0x1022};
-static const size_t ROOM_SLOW_N = sizeof(ROOM_SLOW) / sizeof(ROOM_SLOW[0]);
-
-// Per-controller (rail idx 1-3) identity poll (all slow/static): revision + fw string.
-static const uint16_t CONTROLLER_POLL[] = {0x0015, 0x007F};
-static const size_t CONTROLLER_POLL_N = sizeof(CONTROLLER_POLL) / sizeof(CONTROLLER_POLL[0]);
-
-// Slow-tier interval for static identity attrs (rooms' identity, controllers, idx0).
+// Two poll tiers: FAST = live values at poll_interval_ (e.g. the climate's temp/setpoint/state, and
+// floor temp for floor-regulated rooms); SLOW = slowly-changing identity/state at 60 s (model, fw,
+// battery, output bitmaps, setpoint bounds, faults, …). Each entity registers the attrs it consumes
+// (add_fast_attr/add_slow_attr); build_poll_list_ groups them by idx and de-dups (fast wins over
+// slow), so we poll exactly what's enabled.
 static const uint32_t SLOW_POLL_MS = 60000;
 
-// Discovery probe attribute sets, per entity class — what each is decoded into by log_discovery_.
-static const uint16_t DISC_CONTROLLER[] = {0x0015, 0x007F, 0x7040, 0x7041};
+// Discovery probe attribute sets, per entity class — decoded into a logged inventory by
+// log_discovery_(). Per controller: presence/version + fw. Per room: presence/type, fw,
+// floor-sensor presence, and the output bitmaps (which actuator channels serve the room).
+static const uint16_t DISC_CONTROLLER[] = {0x0015, 0x007F};
 static const size_t DISC_CONTROLLER_N = sizeof(DISC_CONTROLLER) / sizeof(DISC_CONTROLLER[0]);
-static const uint16_t DISC_OUTPUT[] = {0x1008, 0x1200, 0x030C};
-static const uint16_t DISC_ROOM[] = {0x0080, 0x007F, 0x1020, 0x1021, 0x1022, 0x0304, 0x030F};
+static const uint16_t DISC_ROOM[] = {0x0080, 0x007F, 0x1020, 0x1021, 0x1022, 0x0304};
 static const size_t DISC_ROOM_N = sizeof(DISC_ROOM) / sizeof(DISC_ROOM[0]);
 
 // Topology: ≤3 controllers, 15 rooms (0x31+) and 15 outputs (0x04+) each. Controller 1 (the gateway)
-// answers for the whole linked system. controller m's slots:
+// answers for the whole linked system. Rooms are addressed directly; controller m's room base:
 static const uint8_t SLOTS_PER_CONTROLLER = 15;
 static inline uint8_t room_base(uint8_t m) { return 0x31 + (m - 1) * SLOTS_PER_CONTROLLER; }
-static inline uint8_t output_base(uint8_t m) { return 0x04 + (m - 1) * SLOTS_PER_CONTROLLER; }
 
 void DanfossIconHub::add_room(uint8_t idx) {
   for (uint8_t r : rooms_)
@@ -57,50 +46,43 @@ void DanfossIconHub::add_controller(uint8_t idx) {
 
 void DanfossIconHub::setup() {
   rx_buf_.reserve(128);
+  // Heartbeat: always fast-poll the primary controller's revision (0x0015) — a static, always-present
+  // read that keeps the Connection sensor's link measurement alive whatever entities are configured.
+  // De-duped against a controller identity entity that also reads it (fast wins).
+  add_fast_attr(0x01, 0x0015);
   ESP_LOGCONFIG(TAG, "Danfoss Icon hub starting (%u listener(s))", (unsigned) listeners_.size());
 }
 
 void DanfossIconHub::build_poll_list_() {
   poll_list_.clear();
-  for (uint8_t idx : controllers_)
-    poll_list_.push_back({idx, {CONTROLLER_POLL, CONTROLLER_POLL + CONTROLLER_POLL_N}, "controller", SLOW_POLL_MS});
-  // Per room: a fast item (the live climate values) + a slow item (static identity + any attrs
-  // registered by optional entities, e.g. floor/away/asleep/fault — so we poll exactly what's enabled).
-  for (uint8_t idx : rooms_) {
-    poll_list_.push_back({idx, {ROOM_FAST, ROOM_FAST + ROOM_FAST_N}, "room", poll_interval_ms_});
-    std::vector<uint16_t> slow(ROOM_SLOW, ROOM_SLOW + ROOM_SLOW_N);
-    if (force_manual_) {
-      slow.push_back(0x100B);  // room control — read so a scheduled room can be forced to manual
-      slow.push_back(0x100A);  // room mode — and an Away/Asleep room forced back to AtHome
-    }
-    for (const auto &e : extra_room_attrs_)
-      if (e.first == idx && std::find(slow.begin(), slow.end(), e.second) == slow.end())  // dedup shared attrs
-        slow.push_back(e.second);
-    poll_list_.push_back({idx, slow, "room-id", SLOW_POLL_MS});
-  }
-  // Attrs registered on a non-room idx (e.g. idx0 serial 0x0016) get their own slow item.
-  std::vector<uint8_t> handled;
-  for (const auto &e : extra_room_attrs_) {
-    bool is_room = false;
-    for (uint8_t r : rooms_)
-      if (r == e.first) {
-        is_room = true;
-        break;
-      }
-    bool seen = false;
-    for (uint8_t h : handled)
-      if (h == e.first) {
-        seen = true;
-        break;
-      }
-    if (is_room || seen)
-      continue;
-    handled.push_back(e.first);
-    std::vector<uint16_t> attrs;
-    for (const auto &e2 : extra_room_attrs_)
-      if (e2.first == e.first)
-        attrs.push_back(e2.second);
-    poll_list_.push_back({e.first, attrs, "global", SLOW_POLL_MS});
+  // Collect the distinct idxs that have any registration, in first-seen order.
+  std::vector<uint8_t> idxs;
+  for (const auto &r : poll_regs_)
+    if (std::find(idxs.begin(), idxs.end(), r.idx) == idxs.end())
+      idxs.push_back(r.idx);
+  // Per idx: one fast item (its fast attrs) at poll_interval_, one slow item (its slow attrs, minus
+  // any already fast) at 60 s. Tag is derived from the idx range (idx0 = global, 1-3 = controller).
+  for (uint8_t idx : idxs) {
+    std::vector<uint16_t> fast, slow;
+    for (const auto &r : poll_regs_)
+      if (r.idx == idx && r.fast && std::find(fast.begin(), fast.end(), r.attr) == fast.end())
+        fast.push_back(r.attr);
+    for (const auto &r : poll_regs_)
+      if (r.idx == idx && !r.fast && std::find(fast.begin(), fast.end(), r.attr) == fast.end() &&
+          std::find(slow.begin(), slow.end(), r.attr) == slow.end())
+        slow.push_back(r.attr);
+    // force_manual: on boot, read each room's control/mode so a scheduled or Away/Asleep room can be
+    // reset to manual + AtHome (HA owns the active setpoint). Slow tier, de-duped like the rest.
+    if (force_manual_ && idx >= 0x31)
+      for (uint16_t a : {(uint16_t) 0x100B, (uint16_t) 0x100A})
+        if (std::find(fast.begin(), fast.end(), a) == fast.end() &&
+            std::find(slow.begin(), slow.end(), a) == slow.end())
+          slow.push_back(a);
+    const char *tag = idx == 0x00 ? "global" : (idx <= 0x03 ? "controller" : "room");
+    if (!fast.empty())
+      poll_list_.push_back({idx, fast, tag, poll_interval_ms_});
+    if (!slow.empty())
+      poll_list_.push_back({idx, slow, tag, SLOW_POLL_MS});
   }
   poll_list_built_ = true;
   ESP_LOGCONFIG(TAG, "Poll list built: %u item(s), %u controller(s), %u room(s)", (unsigned) poll_list_.size(),
@@ -109,8 +91,8 @@ void DanfossIconHub::build_poll_list_() {
 
 void DanfossIconHub::build_discovery_() {
   // Adaptive one-shot topology probe (logged, not turned into entities): probe controllers
-  // 0x01-0x03; each present controller expands to its 15 rooms + 15 outputs
-  // (expand_discovery_for_controller_), so absent controllers' slot ranges aren't blind-probed.
+  // 0x01-0x03; each present controller expands to its 15 rooms
+  // (expand_discovery_for_controller_), so absent controllers' room ranges aren't blind-probed.
   discovery_.clear();
   disc_inventory_.clear();
   disc_rooms_.clear();
@@ -122,13 +104,11 @@ void DanfossIconHub::build_discovery_() {
 }
 
 void DanfossIconHub::expand_discovery_for_controller_(uint8_t controller) {
-  uint8_t rb = room_base(controller), ob = output_base(controller);
-  for (uint8_t i = 0; i < SLOTS_PER_CONTROLLER; i++)
-    discovery_.push_back({(uint8_t) (ob + i), {DISC_OUTPUT, DISC_OUTPUT + 3}, "output"});
+  uint8_t rb = room_base(controller);
   for (uint8_t i = 0; i < SLOTS_PER_CONTROLLER; i++)
     discovery_.push_back({(uint8_t) (rb + i), {DISC_ROOM, DISC_ROOM + DISC_ROOM_N}, "room"});
-  ESP_LOGI(TAG, "controller %u present: probing outputs 0x%02X-0x%02X, rooms 0x%02X-0x%02X", controller, ob,
-           (unsigned) (ob + SLOTS_PER_CONTROLLER - 1), rb, (unsigned) (rb + SLOTS_PER_CONTROLLER - 1));
+  ESP_LOGI(TAG, "controller %u present: probing rooms 0x%02X-0x%02X", controller, rb,
+           (unsigned) (rb + SLOTS_PER_CONTROLLER - 1));
 }
 
 void DanfossIconHub::loop() {
@@ -147,6 +127,15 @@ void DanfossIconHub::loop() {
 
   update_link_();
   maybe_send_next_();
+
+  // Drain any pending paste-ready YAML a few lines per loop (see print_yaml): logging it all at once
+  // would block one loop long enough to trip the slow-loop watchdog, especially over the API link.
+  for (int i = 0; i < 5 && yaml_idx_ < yaml_pending_.size(); i++)
+    ESP_LOGI(TAG, "%s", yaml_pending_[yaml_idx_++].c_str());
+  if (yaml_idx_ > 0 && yaml_idx_ >= yaml_pending_.size()) {
+    yaml_pending_.clear();
+    yaml_idx_ = 0;
+  }
 }
 
 void DanfossIconHub::update_link_() {
@@ -228,7 +217,7 @@ void DanfossIconHub::handle_frame_(const uint8_t *f, size_t len) {
   } else if (disc) {
     bool present = log_discovery_(in_flight_.idx, in_flight_.attrs, val, vlen);
     if (present && in_flight_.idx >= 0x01 && in_flight_.idx <= 0x03)
-      expand_discovery_for_controller_(in_flight_.idx);  // probe this controller's rooms+outputs
+      expand_discovery_for_controller_(in_flight_.idx);  // probe this controller's rooms
   } else {
     dispatch_read_reply_(val, vlen);
   }
@@ -350,10 +339,9 @@ void DanfossIconHub::send_write_(const WriteReq &w) {
 bool DanfossIconHub::log_discovery_(uint8_t idx, const std::vector<uint16_t> &attrs, const uint8_t *val, size_t vlen) {
   const uint8_t *p = val;
   size_t rem = vlen;
-  uint16_t pid = 0, outlo = 0, outmid = 0, outhi = 0, floor = 0, oavail = 0, ouse = 0;
+  uint16_t pid = 0, outlo = 0, outmid = 0, outhi = 0, floor = 0;
   uint32_t rev = 0;
-  uint8_t batt = 0xFF, usedby = 0xFF, st = 0, duty = 0;
-  bool h_floor = false, h_batt = false;
+  bool h_floor = false;
   char fw[20] = {0};
   uint8_t desc[7];
   size_t desclen = 0;
@@ -394,27 +382,8 @@ bool DanfossIconHub::log_discovery_(uint8_t idx, const std::vector<uint16_t> &at
         floor = ((uint16_t) p[0] << 8) | p[1];
         h_floor = true;
         break;
-      case 0x030F:
-        batt = p[0];
-        h_batt = true;
-        break;
       case 0x0015:
         rev = ((uint32_t) p[0] << 24) | ((uint32_t) p[1] << 16) | ((uint32_t) p[2] << 8) | p[3];
-        break;
-      case 0x7040:
-        oavail = ((uint16_t) p[0] << 8) | p[1];
-        break;
-      case 0x7041:
-        ouse = ((uint16_t) p[0] << 8) | p[1];
-        break;
-      case 0x1008:
-        usedby = p[0];
-        break;
-      case 0x1200:
-        st = p[0];
-        break;
-      case 0x030C:
-        duty = p[0];
         break;
       default:
         break;
@@ -426,17 +395,10 @@ bool DanfossIconHub::log_discovery_(uint8_t idx, const std::vector<uint16_t> &at
   if (idx <= 0x03) {  // controller / rail — present only if it has a real revision
     if (rev == 0)
       return false;  // absent controller (idx 2/3 reply with zeroed revision)
-    record_discovery_(str_sprintf("Controller %u (idx 0x%02X): fw %s, hw %u.%02u, sw %u.%02u, %u/%u outputs in use",
-                                  idx, idx, fw, (unsigned) ((rev >> 24) & 0xFF), (unsigned) ((rev >> 16) & 0xFF),
-                                  (unsigned) ((rev >> 8) & 0xFF), (unsigned) (rev & 0xFF),
-                                  (unsigned) __builtin_popcount(ouse), (unsigned) __builtin_popcount(oavail)));
+    record_discovery_(str_sprintf("Controller %u (idx 0x%02X): fw %s, hw %u.%02u, sw %u.%02u", idx, idx, fw,
+                                  (unsigned) ((rev >> 24) & 0xFF), (unsigned) ((rev >> 16) & 0xFF),
+                                  (unsigned) ((rev >> 8) & 0xFF), (unsigned) (rev & 0xFF)));
     disc_controllers_.push_back(idx);
-    return true;
-  } else if (idx <= 0x30) {  // actuator output — present only if assigned to a room
-    if (usedby == 0x00 || usedby == 0xFF)
-      return false;  // unassigned slot (0x00 seen for unused outputs)
-    record_discovery_(str_sprintf("Output %u (idx 0x%02X) -> room %u: duty %u%%, auto %s", (unsigned) (idx - 0x03), idx,
-                                  usedby, duty, st ? "on" : "off"));
     return true;
   } else {  // room / thermostat — present only if it has a product id (descriptor [4:5])
     if (pid == 0)
@@ -452,25 +414,13 @@ bool DanfossIconHub::log_discovery_(uint8_t idx, const std::vector<uint16_t> &at
       snprintf(floorbuf, sizeof(floorbuf), "%.2fC", floor / 100.0f);
     else
       strcpy(floorbuf, "none");
-    char battbuf[12];
-    if (!h_batt)
-      strcpy(battbuf, "?");
-    else if (batt <= 100)
-      snprintf(battbuf, sizeof(battbuf), "%u%%", batt);
-    else if (batt == 0xFE)
-      strcpy(battbuf, "LOW");
-    else if (batt == 0xFF)
-      strcpy(battbuf, "wired");
-    else
-      snprintf(battbuf, sizeof(battbuf), "0x%02X", batt);
     std::string outs;  // actuator channels serving this room (union of the slow/med/fast groups)
     uint16_t out_bits = outlo | outmid | outhi;
     for (int b = 0; b < 16; b++)
       if (out_bits & (1 << b))
         outs += (outs.empty() ? "" : ", ") + str_sprintf("#%d", b + 1);
-    record_discovery_(str_sprintf("Room %u (idx 0x%02X): %s, fw %s, battery %s, floor %s, outputs %s",
-                                  (unsigned) (idx - 0x30), idx, type, fw, battbuf, floorbuf,
-                                  outs.empty() ? "none" : outs.c_str()));
+    record_discovery_(str_sprintf("Room %u (idx 0x%02X): %s, fw %s, floor %s, outputs %s", (unsigned) (idx - 0x30), idx,
+                                  type, fw, floorbuf, outs.empty() ? "none" : outs.c_str()));
     disc_rooms_.push_back(idx);
     if (h_floor && floor != DI_TEMP_INVALID)
       disc_floor_rooms_.push_back(idx);  // a real floor reading -> floor sensor fitted
@@ -479,56 +429,61 @@ bool DanfossIconHub::log_discovery_(uint8_t idx, const std::vector<uint16_t> &at
 }
 
 void DanfossIconHub::print_yaml() {
-  ESP_LOGI(TAG, "----- discovered config (paste-ready, sub-device grouped) -----");
+  // Build the paste-ready config into a queue (fast — string formatting only); loop() drains it a
+  // few lines per iteration, so a large dump never blocks one loop past the slow-loop watchdog.
+  yaml_pending_.clear();
+  yaml_idx_ = 0;
+  auto emit = [this](std::string s) { yaml_pending_.push_back(std::move(s)); };
+
+  emit("----- discovered config (paste-ready, sub-device grouped) -----");
   // The primary controller (rail idx 1) is implicit = this node device, so it needs no config.
   // Secondary controllers (rail idx 2/3) each get a sub-device. Rooms are always sub-deviced.
   size_t n_secondary = 0;
   for (uint8_t idx : disc_controllers_)
     if (idx > 1)
       n_secondary++;
-  const bool any_subdevices = !disc_rooms_.empty() || n_secondary > 0;
   // HA sub-devices go under esphome:.
-  if (any_subdevices) {
-    ESP_LOGI(TAG, "esphome:");
-    ESP_LOGI(TAG, "  devices:");
+  if (!disc_rooms_.empty() || n_secondary > 0) {
+    emit("esphome:");
+    emit("  devices:");
     for (uint8_t idx : disc_rooms_) {
       unsigned g = idx - 0x31 + 1;
-      ESP_LOGI(TAG, "    - id: dev_room_%u", g);
-      ESP_LOGI(TAG, "      name: \"Room %u\"", g);
+      emit(str_sprintf("    - id: dev_room_%u", g));
+      emit(str_sprintf("      name: \"Room %u\"", g));
     }
     for (uint8_t idx : disc_controllers_)
       if (idx > 1) {
-        ESP_LOGI(TAG, "    - id: dev_secondary_%u", idx);
-        ESP_LOGI(TAG, "      name: \"Secondary Controller %u\"", idx - 1);
+        emit(str_sprintf("    - id: dev_secondary_%u", idx));
+        emit(str_sprintf("      name: \"Secondary Controller %u\"", idx - 1));
       }
   }
   // Hub room/secondary-controller lists referencing those devices.
-  ESP_LOGI(TAG, "danfoss_icon:");
+  emit("danfoss_icon:");
   if (!disc_rooms_.empty()) {
-    ESP_LOGI(TAG, "  rooms:");
+    emit("  rooms:");
     for (uint8_t idx : disc_rooms_) {
       uint8_t rel = idx - 0x31, m = rel / 15 + 1, n = rel % 15 + 1;
-      ESP_LOGI(TAG, "    - number: %u", n);
+      emit(str_sprintf("    - number: %u", n));
       if (m > 1)
-        ESP_LOGI(TAG, "      controller: %u", m);  // rail position; omitted for the primary (1)
-      ESP_LOGI(TAG, "      name: \"Room %u\"", (unsigned) (rel + 1));
-      ESP_LOGI(TAG, "      device_id: dev_room_%u", (unsigned) (rel + 1));
+        emit(str_sprintf("      controller: %u", m));  // rail position; omitted for the primary (1)
+      emit(str_sprintf("      name: \"Room %u\"", (unsigned) (rel + 1)));
+      emit(str_sprintf("      device_id: dev_room_%u", (unsigned) (rel + 1)));
       // Floor sensor detected (0x0304 reported a real value) -> enable the floor feature set.
       if (std::find(disc_floor_rooms_.begin(), disc_floor_rooms_.end(), idx) != disc_floor_rooms_.end())
-        ESP_LOGI(TAG, "      floor: true");
+        emit("      floor: true");
     }
   }
   // Primary controller identity folds onto this node device automatically — no block needed.
   if (n_secondary > 0) {
-    ESP_LOGI(TAG, "  secondary_controllers:");
+    emit("  secondary_controllers:");
     for (uint8_t idx : disc_controllers_)
       if (idx > 1) {
-        ESP_LOGI(TAG, "    - number: %u", idx);  // rail position (2 = first secondary, 3 = second)
-        ESP_LOGI(TAG, "      name: \"Secondary Controller %u\"", idx - 1);
-        ESP_LOGI(TAG, "      device_id: dev_secondary_%u", idx);
+        emit(str_sprintf("    - number: %u", idx));  // rail position (2 = first secondary, 3 = second)
+        emit(str_sprintf("      name: \"Secondary Controller %u\"", idx - 1));
+        emit(str_sprintf("      device_id: dev_secondary_%u", idx));
       }
   }
-  ESP_LOGI(TAG, "---------------------------------------------------------------");
+  emit("---------------------------------------------------------------");
 }
 
 // Log a discovery line live and cache it so dump_config() can replay it on every connect.

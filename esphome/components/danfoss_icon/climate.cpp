@@ -119,7 +119,7 @@ void DanfossIconClimate::on_attr(uint8_t idx, uint16_t attr_id, const uint8_t *d
     case 0x030A: {  // floor-sensor mode: 0=Comfort (air), 1=Floor, 2=Dual (air + floor clamp)
       if (len < 1)
         break;
-      op_mode_ = data[0];
+      floor_mode_ = data[0];
       update_current_temp_();
       break;
     }
@@ -174,17 +174,16 @@ void DanfossIconClimate::update_current_temp_() {
   // Current temp follows the regulated sensor: Floor mode (0x030A==1) shows floor temp (0x0304);
   // Comfort (0) and Dual (2) show room/air temp (0x0300) — Dual regulates air, the floor is only
   // clamped. Matches the Danfoss app and thermostat user guide.
-  float ct = (op_mode_ == 1) ? floor_temp_ : room_temp_;
+  float ct = (floor_mode_ == 1) ? floor_temp_ : room_temp_;
   if (std::isnan(ct))
     return;  // chosen sensor not reported yet (e.g. floor mode before a valid floor reading)
   this->current_temperature = ct;
   this->publish_if_changed_();
 }
 
-// Publish the climate state only when a HA-visible field actually moved. on_attr re-decodes the
-// same attributes every fast poll (~2 s); without this, the full climate state (and its DEBUG log +
-// API push + HA recorder write) would re-emit unchanged every cycle. Visual bounds (0x0507/0x0508)
-// are part of traits() and ride a reconnect, so they're handled separately in set_limit_.
+// Publish only when a HA-visible field (mode/action/target/current) actually moved — avoids fast-poll
+// re-emit churn (see sensor.cpp). Visual bounds (0x0507/0x0508) ride a reconnect via traits(), so
+// they're published separately in set_limit_.
 void DanfossIconClimate::publish_if_changed_() {
   auto same = [](float a, float b) { return (std::isnan(a) && std::isnan(b)) || a == b; };
   if (published_ && this->mode == last_mode_ && this->action == last_action_ &&
