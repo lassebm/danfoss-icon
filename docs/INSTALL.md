@@ -107,7 +107,7 @@ serial, link status, and fault appear automatically on the node's device. Add
 | --- | --- | --- |
 | `uart_id` | — | the UART configured above (required) |
 | `poll_interval` | `2s` | how often to refresh room state |
-| `reply_timeout` | `250ms` | how long to wait for a response before moving on |
+| `reply_timeout` | `500ms` | how long to wait for a response before moving on |
 | `connection_timeout` | `15s` | controller silence before the link reports disconnected |
 | `force_manual` | `true` | on boot, switch any scheduled room to manual so HA owns the setpoint |
 | `discover_button` | `true` | create the "Discover Config" helper button |

@@ -123,6 +123,9 @@ void DanfossIconHub::loop() {
   if (state_ == TxState::WAITING && (millis() - tx_time_ms_) > reply_timeout_ms_) {
     ESP_LOGW(TAG, "timeout on %s idx=0x%02X", in_flight_.tag, in_flight_.idx);
     finish_transaction_();
+    // The reply may still be in transit. Hold the bus until it has been quiet for one timeout window
+    // so the stale reply is discarded as unsolicited rather than misattributed to the next request.
+    resync_quiet_until_ms_ = millis() + reply_timeout_ms_;
   }
 
   update_link_();
@@ -181,7 +184,14 @@ void DanfossIconHub::handle_frame_(const uint8_t *f, size_t len) {
     return;
   }
   if (state_ != TxState::WAITING) {
-    ESP_LOGW(TAG, "unsolicited 0x0D (no transaction in flight)");
+    if (millis() < resync_quiet_until_ms_) {
+      // Expected: the late reply for a just-timed-out request. Discard it and keep draining until the
+      // bus stays quiet for a full window, so we don't misattribute it to the next request.
+      ESP_LOGD(TAG, "discarded stale 0x0D after timeout (resync)");
+      resync_quiet_until_ms_ = millis() + reply_timeout_ms_;
+    } else {
+      ESP_LOGW(TAG, "unsolicited 0x0D (no transaction in flight)");
+    }
     return;
   }
   // A matched 0x0D means the controller is responding (even a non-OK status = link alive).
@@ -272,6 +282,13 @@ void DanfossIconHub::queue_write(uint8_t idx, uint16_t attr_id, const uint8_t *v
 void DanfossIconHub::maybe_send_next_() {
   if (state_ != TxState::IDLE)
     return;
+  // After a timeout, hold off until the bus has been quiet for a full window (see resync_quiet_until_ms_)
+  // so a late, stale reply is dropped as unsolicited instead of being misattributed to this request.
+  if (resync_quiet_until_ms_ != 0) {
+    if (millis() < resync_quiet_until_ms_)
+      return;
+    resync_quiet_until_ms_ = 0;
+  }
   if (!write_queue_.empty()) {  // writes jump the queue ahead of polling
     send_write_(write_queue_.front());
     write_queue_.erase(write_queue_.begin());

@@ -131,8 +131,14 @@ class DanfossIconHub : public Component, public uart::UARTDevice {
   TxState state_{TxState::IDLE};
   InFlight in_flight_;
   uint32_t tx_time_ms_{0};
+  // Post-timeout resync guard. The 0x0D reply has no idx/attr echo, so a request and its reply are
+  // correlated only by lockstep ordering. A single timeout breaks that: the late reply arrives after
+  // we've already sent the next request and gets misattributed to it, shifting every subsequent reply
+  // off-by-one until reboot. After a timeout we hold off sending the next request until the bus has
+  // been quiet for this long, so the stale reply lands in the unsolicited (dropped) path and we resync.
+  uint32_t resync_quiet_until_ms_{0};
   uint32_t poll_interval_ms_{2000};  // fast tier (dynamic attrs)
-  uint32_t reply_timeout_ms_{250};   // wait for a 0x0D reply before timing out the transaction
+  uint32_t reply_timeout_ms_{500};   // wait for a 0x0D reply before timing out the transaction
   bool force_manual_{true};          // boot: reset scheduled rooms to manual/AtHome (HA-authoritative)
 
   // Controller-link tracking: any received 0x0D means the controller is responding. No "link up" bit

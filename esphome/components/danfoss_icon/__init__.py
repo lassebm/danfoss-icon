@@ -278,7 +278,7 @@ CONFIG_SCHEMA = (
                 CONF_POLL_INTERVAL, default="2s"
             ): cv.positive_time_period_milliseconds,
             cv.Optional(
-                CONF_REPLY_TIMEOUT, default="250ms"
+                CONF_REPLY_TIMEOUT, default="500ms"
             ): cv.positive_time_period_milliseconds,
             # On boot, force any room found running a schedule (room control 0x100B != 0) back to
             # manual + AtHome so HA owns the active setpoint. Default on — the emulator's scope is
