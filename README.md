@@ -110,6 +110,7 @@ this repository.
 | **[docs/HARDWARE.md](docs/HARDWARE.md)** | Bill of materials, RJ45 pinout, wiring, and power safety |
 | **[docs/INSTALL.md](docs/INSTALL.md)** | Flashing, configuration, bring-up, and Home Assistant |
 | **[docs/PROTOCOL.md](docs/PROTOCOL.md)** | The wire protocol, for the curious or for contributors |
+| **[enclosure/](enclosure/)** | A parametric, 3D-printable enclosure — the author's build, ready to adapt |
 
 ## Safety & disclaimer
 

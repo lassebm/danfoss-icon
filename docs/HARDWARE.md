@@ -100,3 +100,9 @@ sources and back-feeds one into the other.
   the ESP32.
 - **Termination/bias** is generally unnecessary for the short cable runs typical here; add
   120 Ω termination across each pair only if you see signal-integrity issues on a long run.
+
+## Enclosure
+
+A parametric, 3D-printable enclosure for the assembled node lives in
+**[../enclosure/](../enclosure/)** — it's the author's specific build (ESP32-C3 Super Mini + two
+RS-485 modules + double RJ45 breakout), shared as a reference you can re-fit to your own parts.
