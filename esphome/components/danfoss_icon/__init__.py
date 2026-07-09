@@ -10,6 +10,7 @@ from esphome.components import (
     button as button_,
     climate as climate_,
     number as number_,
+    select as select_,
     sensor as sensor_,
     text_sensor as text_sensor_,
     uart,
@@ -38,7 +39,15 @@ CODEOWNERS = ["@lassebm"]
 DEPENDENCIES = ["uart"]
 # Pull in the climate/sensor base so the hub can create per-room entities without the
 # consumer declaring a `climate:` / `sensor:` platform block.
-AUTO_LOAD = ["climate", "sensor", "text_sensor", "button", "binary_sensor", "number"]
+AUTO_LOAD = [
+    "climate",
+    "sensor",
+    "text_sensor",
+    "button",
+    "binary_sensor",
+    "number",
+    "select",
+]
 MULTI_CONF = True
 
 danfoss_icon_ns = cg.esphome_ns.namespace("danfoss_icon")
@@ -55,6 +64,10 @@ DanfossIconTextSensor = danfoss_icon_ns.class_(
 DanfossIconYamlButton = danfoss_icon_ns.class_("DanfossIconYamlButton", button_.Button)
 DanfossIconNumber = danfoss_icon_ns.class_(
     "DanfossIconNumber", number_.Number, cg.Component
+)
+# Hub-level "All Rooms Mode" select (Home/Away/Sleep/Off across every room).
+DanfossIconModeSelect = danfoss_icon_ns.class_(
+    "DanfossIconModeSelect", select_.Select, cg.Component
 )
 # Problem rollup binary (device_class problem) over a room/controller 0x03F0 — see status.h.
 DanfossIconProblem = danfoss_icon_ns.class_(
@@ -73,7 +86,7 @@ CONF_SECONDARY_CONTROLLERS = "secondary_controllers"
 CONF_POLL_INTERVAL = "poll_interval"
 CONF_REPLY_TIMEOUT = "reply_timeout"
 CONF_CONNECTION_TIMEOUT = "connection_timeout"
-CONF_FORCE_MANUAL = "force_manual"
+CONF_ALL_ROOMS_MODE = "all_rooms_mode"
 CONF_DISCOVER_BUTTON = "discover_button"
 # Per-room / per-controller fields and entity toggles
 # A room's controller (rail position): 1 = primary, 2/3 = secondary
@@ -123,6 +136,8 @@ CONF_SEC_FAULT_ID = "sec_fault_id"
 CONF_SEC_PROBLEM_ID = "sec_problem_id"
 # Helper button
 CONF_DISCOVER_BUTTON_ID = "discover_button_id"
+# Hub-level "All Rooms Mode" select
+CONF_MODE_SELECT_ID = "mode_select_id"
 
 # Topology: up to 3 controllers on the bus (1 primary + up to 2 secondary controllers), 15 rooms
 # each. A room is addressed by controller (rail position 1..3) + number 1..15; the flat wire index
@@ -134,7 +149,10 @@ ROOM_BATTERY_ATTR = 0x030F  # thermostat battery %
 ROOM_MODEL_ATTR = 0x0080  # device descriptor (carries the product id)
 ROOM_FIRMWARE_ATTR = 0x007F  # device firmware version string
 ROOM_TEMP_ATTR = 0x0300  # room air temperature
-ROOM_SETPOINT_ATTR = 0x0509  # active/home setpoint (the HA target)
+ROOM_SETPOINT_HOME_ATTR = 0x0509  # Home preset setpoint
+ROOM_SETPOINT_AWAY_ATTR = 0x050A  # Away preset setpoint
+ROOM_SETPOINT_ASLEEP_ATTR = 0x050B  # Sleep preset setpoint
+ROOM_MODE_ATTR = 0x100A  # room mode: 0=Home, 1=Away, 2=Sleep (the climate preset)
 ROOM_HEATCOOL_ATTR = 0x1013  # heating/cooling state (climate action)
 ROOM_FLOOR_TEMP_ATTR = 0x0304  # floor temperature
 ROOM_FLOOR_MODE_ATTR = 0x030A  # floor-sensor mode: Comfort/Floor/Dual
@@ -244,6 +262,7 @@ CONFIG_SCHEMA = (
             cv.GenerateID(CONF_DISCOVER_BUTTON_ID): cv.declare_id(
                 DanfossIconYamlButton
             ),
+            cv.GenerateID(CONF_MODE_SELECT_ID): cv.declare_id(DanfossIconModeSelect),
             # Primary controller identity entities live on this node device. Their IDs are declared
             # here for auto-registration; each is created unless its toggle below is set false.
             cv.GenerateID(CONF_CTRL_FW_ID): cv.declare_id(DanfossIconTextSensor),
@@ -280,10 +299,9 @@ CONFIG_SCHEMA = (
             cv.Optional(
                 CONF_REPLY_TIMEOUT, default="500ms"
             ): cv.positive_time_period_milliseconds,
-            # On boot, force any room found running a schedule (room control 0x100B != 0) back to
-            # manual + AtHome so HA owns the active setpoint. Default on — the emulator's scope is
-            # manual control; set false to leave the controller's native schedule untouched.
-            cv.Optional(CONF_FORCE_MANUAL, default=True): cv.boolean,
+            # Hub-level "All Rooms Mode" select (Home/Away/Sleep/Off) that fans the chosen mode out to
+            # every room. Default on; set false to omit the extra hub control.
+            cv.Optional(CONF_ALL_ROOMS_MODE, default=True): cv.boolean,
         }
     )
     .extend(uart.UART_DEVICE_SCHEMA)
@@ -314,6 +332,13 @@ _GEN_TEXT_SCHEMA = text_sensor_.text_sensor_schema(
 ).extend(cv.COMPONENT_SCHEMA)
 _GEN_BUTTON_SCHEMA = button_.button_schema(
     DanfossIconYamlButton, entity_category=ENTITY_CATEGORY_DIAGNOSTIC
+)
+# "All Rooms Mode" select. Options must include "Mixed" (a read-only aggregate the component may
+# publish when rooms differ); selecting it is a no-op. Order of the first four matches the mode codes
+# 0/1/2/3 the C++ side uses (Home/Away/Sleep/Off).
+MODE_SELECT_OPTIONS = ["Home", "Away", "Sleep", "Off", "Mixed"]
+_GEN_MODE_SELECT_SCHEMA = select_.select_schema(DanfossIconModeSelect).extend(
+    cv.COMPONENT_SCHEMA
 )
 _GEN_CONN_SCHEMA = binary_sensor_.binary_sensor_schema(
     device_class=DEVICE_CLASS_CONNECTIVITY,
@@ -350,16 +375,25 @@ async def _new_room_climate(hub, room, name, device_id):
     cg.add(var.set_parent(hub))
     idx = _room_index(room)
     cg.add(var.set_room_index(idx))
-    # Live climate values — fast tier: air temp, active setpoint, heat/cool state. (Floor temp, the
-    # current_temperature source in Floor mode, is registered fast by the floor feature set below;
-    # the regulation-mode selector 0x030A is polled there too, gated to floor rooms.)
+    # Live sensor state — fast tier: air temp + heat/cool state. (Floor temp, the current_temperature
+    # source in Floor mode, is registered fast by the floor feature set below; the regulation-mode
+    # selector 0x030A is polled there too, gated to floor rooms.)
     cg.add(hub.add_fast_attr(idx, ROOM_TEMP_ATTR))
-    cg.add(hub.add_fast_attr(idx, ROOM_SETPOINT_ATTR))
     cg.add(hub.add_fast_attr(idx, ROOM_HEATCOOL_ATTR))
+    # Presets — fast tier: the room mode plus all three preset setpoints (Home/Away/Sleep). The active
+    # one is the HA target, and a setpoint change made at the thermostat is written by the controller
+    # into whichever preset is active, so all three poll fast to reflect promptly. They ride the room's
+    # single multi-attr fast read — just a longer frame, not an extra transaction. (The room control
+    # 0x100B that keeps the room manual is polled slow by the hub.)
+    cg.add(hub.add_fast_attr(idx, ROOM_MODE_ATTR))
+    cg.add(hub.add_fast_attr(idx, ROOM_SETPOINT_HOME_ATTR))
+    cg.add(hub.add_fast_attr(idx, ROOM_SETPOINT_AWAY_ATTR))
+    cg.add(hub.add_fast_attr(idx, ROOM_SETPOINT_ASLEEP_ATTR))
     # Per-room setpoint min/max (0x0507/0x0508) drive the climate's visual bounds + clamp. Slow tier
     # (rarely change — only via thermostat menu/app); HA picks up new visual bounds on reconnect.
     cg.add(hub.add_slow_attr(idx, ROOM_SETPOINT_MIN_ATTR))
     cg.add(hub.add_slow_attr(idx, ROOM_SETPOINT_MAX_ATTR))
+    return var
 
 
 async def _new_room_battery(hub, room, name, device_id):
@@ -463,7 +497,6 @@ async def to_code(config):
     await uart.register_uart_device(var, config)
     cg.add(var.set_poll_interval(config[CONF_POLL_INTERVAL]))
     cg.add(var.set_reply_timeout(config[CONF_REPLY_TIMEOUT]))
-    cg.add(var.set_force_manual(config[CONF_FORCE_MANUAL]))
 
     if config[CONF_DISCOVER_BUTTON]:
         bcfg = _GEN_BUTTON_SCHEMA(
@@ -474,6 +507,7 @@ async def to_code(config):
 
     cg.add(var.set_link_timeout(config[CONF_CONNECTION_TIMEOUT]))
 
+    room_climates = []  # climates registered with the hub-level All Rooms Mode select
     for room in config[CONF_ROOMS]:
         idx = _room_index(room)
         dev = room.get(CONF_DEVICE_ID)
@@ -481,7 +515,7 @@ async def to_code(config):
         # otherwise they're prefixed with the room name and the climate carries it.
         prefix = "" if dev is not None else f"{room[CONF_NAME]} "
         climate_name = "" if dev is not None else room[CONF_NAME]
-        await _new_room_climate(var, room, climate_name, dev)
+        room_climates.append(await _new_room_climate(var, room, climate_name, dev))
         if room[CONF_SETPOINT_LIMITS]:
             await _new_room_setpoint_limit(
                 var,
@@ -573,6 +607,16 @@ async def to_code(config):
                 ROOM_FLOOR_MAX_ATTR,
                 dev,
             )
+
+    # Hub-level "All Rooms Mode" select — fans a Home/Away/Sleep/Off choice out to every room.
+    if config[CONF_ALL_ROOMS_MODE] and room_climates:
+        scfg = _GEN_MODE_SELECT_SCHEMA(
+            {CONF_ID: config[CONF_MODE_SELECT_ID], CONF_NAME: "All Rooms Mode"}
+        )
+        sel = await select_.new_select(scfg, options=MODE_SELECT_OPTIONS)
+        await cg.register_component(sel, scfg)
+        for clim in room_climates:
+            cg.add(sel.add_climate(clim))
 
     # Primary controller (rail idx 1) = THIS node device: identity entities use bare names, so
     # "Danfoss Icon" represents the controller. Each is gated by its toggle (mirroring secondaries).

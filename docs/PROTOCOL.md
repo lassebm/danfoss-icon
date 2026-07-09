@@ -140,7 +140,9 @@ attribute as the pair (index-class, attribute-id).
   18.00). **`0x8000` = invalid / no-sensor / unconfigured** sentinel.
 - **Version strings** — length-prefixed ASCII (`05 '6' '.' '0' '4' 00` → "6.04").
 - **`u8`** — enum / flag / percentage. **`u32`** — timestamps / serial-like values.
-- **Schedule blocks** (`0x100C–0x1012`, Mon–Sun) — 13-byte records.
+- **Schedule blocks** (`0x100C–0x1012`, Mon–Sun) — 13-byte records; documented for completeness but
+  **not used by this project** (rooms are held in manual mode, so the controller's weekly schedule
+  never runs).
 
 Because a response carries no attribute echo, the node slices the reply into values using the
 known **byte size of each requested attribute**, in request order. The sizes for the attributes
@@ -170,12 +172,14 @@ different things per class, so read each table as `(class, attribute)`.
 | `0x030F` | thermostat battery | percent; `0xFE` = low, `0xFF` = wired |
 | `0x03F0` | error code | 16-bit fault bitmask (room faults) |
 | `0x0507` / `0x0508` | setpoint min / max | per-room limits, **writable** |
-| `0x0509` | home setpoint | **writable** — the HA-controlled target |
+| `0x0509` | home setpoint | **writable** — the Home climate-preset target |
+| `0x050A` | away setpoint | **writable** — the Away climate-preset target |
+| `0x050B` | sleep setpoint | **writable** — the Sleep climate-preset target |
 | `0x050C` / `0x050D` | floor temp min / max | floor clamp limits, **writable** |
 | `0x007F` | device firmware version | length-prefixed ASCII |
 | `0x0080` | device descriptor | carries the thermostat product id |
-| `0x100A` | room mode | 0 AtHome, Away, Asleep; reset to AtHome by `force_manual` |
-| `0x100B` | room control | 0 manual, non-zero = running a schedule; reset to manual by `force_manual` |
+| `0x100A` | room mode | **writable** — 0 Home, 1 Away, 2 Sleep; the HA climate preset. Selects which preset setpoint regulates |
+| `0x100B` | room control | 0 manual, non-zero = running a schedule; always held at 0 so HA owns the mode/setpoint (the controller's own schedule is not used) |
 | `0x1013` | heating/cooling state | drives the climate **action** (heating / idle) |
 | `0x1020` / `0x1021` / `0x1022` | output-group bitmaps (slow / medium / fast) | union = which actuator channels serve the room |
 

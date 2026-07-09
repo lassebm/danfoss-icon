@@ -30,12 +30,14 @@ native ESPHome API on whatever connectivity the ESP32 provides — **Wi-Fi** on 
 Because the controller is a **passive responder** — it answers valid requests and otherwise runs
 completely standalone — adding this node is **low-risk**: the heating system keeps working with
 or without it, and there is no pairing or seeding step. At boot the node simply starts polling —
-and switches any room running the controller's built-in schedule back to **manual mode**, so Home
-Assistant owns the setpoint (the default; it can be turned off).
+and keeps every room in **manual mode**, so Home Assistant owns the setpoint and room mode (the
+controller's built-in weekly schedule is not used).
 
 ## Features
 
 - **Per-room `climate` entity** — current temperature, target setpoint, mode, and action
+- **Home / Away / Sleep presets** — the controller's native room modes, each with its own setpoint;
+  plus a hub-level **All Rooms Mode** selector that sets every room at once
 - **Setpoint writes** from Home Assistant, range-clamped to each room's configured limits
 - **Floor-heating aware** — tracks the room's regulation sensor (air / floor / dual) per room
 - **Per-room diagnostics** — battery level, thermostat model & firmware, assigned actuator output

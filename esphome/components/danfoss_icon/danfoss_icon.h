@@ -89,9 +89,6 @@ class DanfossIconHub : public Component, public uart::UARTDevice {
   // the ESP<->controller RJ45 link (our side); per-room radio links are separate (room Fault text).
   void set_link_sensor(binary_sensor::BinarySensor *s) { link_sensor_ = s; }
   void set_link_timeout(uint32_t ms) { link_timeout_ms_ = ms; }
-  // On boot, force any room found running a schedule (room control 0x100B != 0) back to manual
-  // (0x100B=0) + AtHome (0x100A=0) so HA owns the active setpoint (0x0509). See dispatch_read_reply_.
-  void set_force_manual(bool b) { force_manual_ = b; }
 
  protected:
   void build_poll_list_();
@@ -139,7 +136,6 @@ class DanfossIconHub : public Component, public uart::UARTDevice {
   uint32_t resync_quiet_until_ms_{0};
   uint32_t poll_interval_ms_{2000};  // fast tier (dynamic attrs)
   uint32_t reply_timeout_ms_{500};   // wait for a 0x0D reply before timing out the transaction
-  bool force_manual_{true};          // boot: reset scheduled rooms to manual/AtHome (HA-authoritative)
 
   // Controller-link tracking: any received 0x0D means the controller is responding. No "link up" bit
   // exists, so the link is inferred from reply silence — hence a (legitimate) timeout here.

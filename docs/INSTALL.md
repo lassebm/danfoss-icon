@@ -109,7 +109,7 @@ serial, link status, and fault appear automatically on the node's device. Add
 | `poll_interval` | `2s` | how often to refresh room state |
 | `reply_timeout` | `500ms` | how long to wait for a response before moving on |
 | `connection_timeout` | `15s` | controller silence before the link reports disconnected |
-| `force_manual` | `true` | on boot, switch any scheduled room to manual so HA owns the setpoint |
+| `all_rooms_mode` | `true` | create the hub-level **All Rooms Mode** select (Home/Away/Sleep/Off across every room) |
 | `discover_button` | `true` | create the "Discover Config" helper button |
 | `firmware`, `hardware_version`, `software_version`, `serial` | `true` | which primary-controller identity sensors to create |
 | `fault` | `true` | primary-controller Fault text **and** Problem alarm |
@@ -166,8 +166,14 @@ rooms your controller actually reports, then copy it into your config.
 ## 6. Home Assistant
 
 Home Assistant auto-discovers the node over the native ESPHome API; confirm/add the integration.
-Each room shows up as a **climate** entity (plus the diagnostic sensors you enabled). Change a
-setpoint and confirm it takes effect on the thermostat — that round-trips a write to the controller.
+Each room shows up as a **climate** entity with **Home / Away / Sleep** presets — each preset has its
+own setpoint, and the controller regulates to whichever is selected — plus the diagnostic sensors you
+enabled. A hub-level **All Rooms Mode** select (Home / Away / Sleep / Off) also appears on the node
+device and switches every room at once. Change a setpoint and confirm it takes effect on the
+thermostat — that round-trips a write to the controller.
+
+Every room is kept in manual mode so Home Assistant owns the mode and setpoint; the controller's own
+weekly schedule is not used.
 
 ## Troubleshooting
 

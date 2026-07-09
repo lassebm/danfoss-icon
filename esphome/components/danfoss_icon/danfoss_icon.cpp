@@ -71,13 +71,11 @@ void DanfossIconHub::build_poll_list_() {
       if (r.idx == idx && !r.fast && std::find(fast.begin(), fast.end(), r.attr) == fast.end() &&
           std::find(slow.begin(), slow.end(), r.attr) == slow.end())
         slow.push_back(r.attr);
-    // force_manual: on boot, read each room's control/mode so a scheduled or Away/Asleep room can be
-    // reset to manual + AtHome (HA owns the active setpoint). Slow tier, de-duped like the rest.
-    if (force_manual_ && idx >= 0x31)
-      for (uint16_t a : {(uint16_t) 0x100B, (uint16_t) 0x100A})
-        if (std::find(fast.begin(), fast.end(), a) == fast.end() &&
-            std::find(slow.begin(), slow.end(), a) == slow.end())
-          slow.push_back(a);
+    // Poll each room's control mode (0x100B) so a room found running a schedule can be reset to manual
+    // (0x100A, the preset, is fast-polled by the climate). Slow tier, de-duped like the rest.
+    if (idx >= 0x31 && std::find(fast.begin(), fast.end(), (uint16_t) 0x100B) == fast.end() &&
+        std::find(slow.begin(), slow.end(), (uint16_t) 0x100B) == slow.end())
+      slow.push_back(0x100B);
     const char *tag = idx == 0x00 ? "global" : (idx <= 0x03 ? "controller" : "room");
     if (!fast.empty())
       poll_list_.push_back({idx, fast, tag, poll_interval_ms_});
@@ -249,19 +247,13 @@ void DanfossIconHub::dispatch_read_reply_(const uint8_t *val, size_t vlen) {
     }
     for (auto *l : listeners_)
       l->on_attr(in_flight_.idx, attr, p, sz);
-    // force_manual: HA owns the active setpoint (0x0509), which the firmware uses only when the
-    // room is BOTH manual (room control 0x100B == 0) AND AtHome (room mode 0x100A == 0) — otherwise
-    // it regulates to a schedule (0x100B) or to the Away/Asleep preset (0x100A). Reset whichever
-    // is non-zero, independently. Self-healing — re-issued each slow poll until the read is 0.
-    if (force_manual_ && in_flight_.idx >= 0x31 && sz >= 1 && p[0] != 0) {
+    // Keep every room manual (0x100B==0) so HA owns the active setpoint and the mode (0x100A) selects
+    // the Home/Away/Sleep preset directly; the controller's own weekly schedule is intentionally not
+    // used. Self-healing: re-issued each slow poll until the read is 0.
+    if (in_flight_.idx >= 0x31 && attr == 0x100B && sz >= 1 && p[0] != 0) {
       const uint8_t zero = 0x00;
-      if (attr == 0x100B) {
-        queue_write(in_flight_.idx, 0x100B, &zero, 1);  // room control -> manual
-        ESP_LOGI(TAG, "force_manual: idx=0x%02X scheduled (0x100B=%u) -> manual", in_flight_.idx, p[0]);
-      } else if (attr == 0x100A) {
-        queue_write(in_flight_.idx, 0x100A, &zero, 1);  // room mode -> AtHome
-        ESP_LOGI(TAG, "force_manual: idx=0x%02X mode (0x100A=%u) -> AtHome", in_flight_.idx, p[0]);
-      }
+      queue_write(in_flight_.idx, 0x100B, &zero, 1);  // room control -> manual
+      ESP_LOGI(TAG, "idx=0x%02X scheduled (0x100B=%u) -> manual", in_flight_.idx, p[0]);
     }
     p += sz;
     remaining -= sz;
