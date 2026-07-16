@@ -60,7 +60,7 @@ struct InFlight {
 
 enum class TxState { IDLE, WAITING };
 
-class DanfossIconHub : public Component, public uart::UARTDevice {
+class DanfossIconHub final : public Component, public uart::UARTDevice {
  public:
   void setup() override;
   void loop() override;
@@ -73,11 +73,11 @@ class DanfossIconHub : public Component, public uart::UARTDevice {
   // Register an attribute for polling on (idx), at the fast (poll_interval) or slow (60 s) tier.
   // Entities call these for exactly what they consume; build_poll_list_ groups by idx and de-dups
   // (an attr registered on both tiers polls fast). Nothing is polled that no entity registered.
-  void add_fast_attr(uint8_t idx, uint16_t attr) { poll_regs_.push_back({idx, attr, true}); }
-  void add_slow_attr(uint8_t idx, uint16_t attr) { poll_regs_.push_back({idx, attr, false}); }
-  void set_poll_interval(uint32_t ms) { poll_interval_ms_ = ms; }
-  void set_reply_timeout(uint32_t ms) { reply_timeout_ms_ = ms; }
-  void add_listener(DanfossIconListener *l) { listeners_.push_back(l); }
+  void add_fast_attr(uint8_t idx, uint16_t attr) { this->poll_regs_.push_back({idx, attr, true}); }
+  void add_slow_attr(uint8_t idx, uint16_t attr) { this->poll_regs_.push_back({idx, attr, false}); }
+  void set_poll_interval(uint32_t ms) { this->poll_interval_ms_ = ms; }
+  void set_reply_timeout(uint32_t ms) { this->reply_timeout_ms_ = ms; }
+  void add_listener(DanfossIconListener *l) { this->listeners_.push_back(l); }
 
   // Queue a write (e.g. a HA setpoint change). Prioritized ahead of polling reads.
   void queue_write(uint8_t idx, uint16_t attr_id, const uint8_t *value, uint8_t len);
@@ -87,8 +87,8 @@ class DanfossIconHub : public Component, public uart::UARTDevice {
 
   // Optional controller-link indicator (device_class: connectivity). On = controller responding. This is
   // the ESP<->controller RJ45 link (our side); per-room radio links are separate (room Fault text).
-  void set_link_sensor(binary_sensor::BinarySensor *s) { link_sensor_ = s; }
-  void set_link_timeout(uint32_t ms) { link_timeout_ms_ = ms; }
+  void set_link_sensor(binary_sensor::BinarySensor *s) { this->link_sensor_ = s; }
+  void set_link_timeout(uint32_t ms) { this->link_timeout_ms_ = ms; }
 
  protected:
   void build_poll_list_();

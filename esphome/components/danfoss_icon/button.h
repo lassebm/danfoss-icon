@@ -6,12 +6,12 @@ namespace esphome {
 namespace danfoss_icon {
 
 // Diagnostic button: on press, logs a paste-ready YAML config of the discovered topology.
-class DanfossIconYamlButton : public button::Button {
+class DanfossIconYamlButton final : public button::Button {
  public:
-  void set_parent(DanfossIconHub *parent) { parent_ = parent; }
+  void set_parent(DanfossIconHub *parent) { this->parent_ = parent; }
 
  protected:
-  void press_action() override { parent_->print_yaml(); }
+  void press_action() override { this->parent_->print_yaml(); }
   DanfossIconHub *parent_{nullptr};
 };
 

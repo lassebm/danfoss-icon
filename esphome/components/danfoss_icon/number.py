@@ -3,12 +3,15 @@ from esphome.components import number
 import esphome.config_validation as cv
 from esphome.const import CONF_MAX_VALUE, CONF_MIN_VALUE, CONF_STEP, UNIT_CELSIUS
 
-from . import CONF_DANFOSS_ICON_ID, DanfossIconHub, DanfossIconNumber
+from . import (
+    CONF_ATTRIBUTE,
+    CONF_DANFOSS_ICON_ID,
+    CONF_INDEX,
+    DanfossIconHub,
+    DanfossIconNumber,
+)
 
 DEPENDENCIES = ["danfoss_icon"]
-
-CONF_INDEX = "index"
-CONF_ATTRIBUTE = "attribute"
 
 # Writable temperature attribute (u16 BE ×100 °C), e.g. per-room setpoint min/max 0x0507/0x0508.
 # min/max/step bound the HA slider; defaults match the controller's setpoint range.

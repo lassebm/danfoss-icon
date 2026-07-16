@@ -12,9 +12,9 @@ namespace danfoss_icon {
 // (Home/Away/Sleep/Off). Setting an option fans the change out as one write per room (there is no
 // verified wire broadcast for a per-room attribute). The read state is the aggregate: the shared
 // mode, or "Mixed" when the rooms differ — recomputed from the live climate state in loop().
-class DanfossIconModeSelect : public select::Select, public Component {
+class DanfossIconModeSelect final : public select::Select, public Component {
  public:
-  void add_climate(DanfossIconClimate *c) { climates_.push_back(c); }
+  void add_climate(DanfossIconClimate *c) { this->climates_.push_back(c); }
   void loop() override;
   void dump_config() override;
 

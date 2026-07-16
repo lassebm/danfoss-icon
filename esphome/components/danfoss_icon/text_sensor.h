@@ -21,12 +21,12 @@ enum DiTextDecode {
 };
 
 // Generic text sensor bound to one (idx, attr_id) — for identity / diagnostics.
-class DanfossIconTextSensor : public text_sensor::TextSensor, public Component, public DanfossIconListener {
+class DanfossIconTextSensor final : public text_sensor::TextSensor, public Component, public DanfossIconListener {
  public:
-  void set_parent(DanfossIconHub *parent) { parent_ = parent; }
-  void set_index(uint8_t idx) { idx_ = idx; }
-  void set_attribute(uint16_t attr) { attr_ = attr; }
-  void set_decode(DiTextDecode d) { decode_ = d; }
+  void set_parent(DanfossIconHub *parent) { this->parent_ = parent; }
+  void set_index(uint8_t idx) { this->idx_ = idx; }
+  void set_attribute(uint16_t attr) { this->attr_ = attr; }
+  void set_decode(DiTextDecode d) { this->decode_ = d; }
 
   void setup() override;
   void dump_config() override;

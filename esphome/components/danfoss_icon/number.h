@@ -10,11 +10,11 @@ namespace danfoss_icon {
 // e.g. the per-room setpoint min/max (0x0507/0x0508). HA edits call control(); the controller's
 // read-back confirms via on_attr. The room's climate entity re-reads the same attr on poll, so its
 // visual bounds + clamp follow an edit automatically (after the usual reconnect for visual bounds).
-class DanfossIconNumber : public number::Number, public Component, public DanfossIconListener {
+class DanfossIconNumber final : public number::Number, public Component, public DanfossIconListener {
  public:
-  void set_parent(DanfossIconHub *parent) { parent_ = parent; }
-  void set_index(uint8_t idx) { idx_ = idx; }
-  void set_attribute(uint16_t attr) { attr_ = attr; }
+  void set_parent(DanfossIconHub *parent) { this->parent_ = parent; }
+  void set_index(uint8_t idx) { this->idx_ = idx; }
+  void set_attribute(uint16_t attr) { this->attr_ = attr; }
 
   void setup() override;
   void dump_config() override;

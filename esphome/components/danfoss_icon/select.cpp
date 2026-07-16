@@ -17,7 +17,7 @@ void DanfossIconModeSelect::control(const std::string &value) {
       sel = i;
   if (sel < 0)
     return;  // "Mixed" (or anything unexpected) is a read-only aggregate — ignore as a command
-  for (auto *c : climates_) {
+  for (auto *c : this->climates_) {
     if (sel == 3)
       c->set_off();
     else
@@ -25,31 +25,31 @@ void DanfossIconModeSelect::control(const std::string &value) {
   }
   // Optimistic: set_off/set_preset_mode update each climate synchronously, so loop() will agree.
   this->publish_state(value);
-  last_published_ = value;
-  published_ = true;
+  this->last_published_ = value;
+  this->published_ = true;
   ESP_LOGD(TAG, "all rooms -> %s", value.c_str());
 }
 
 void DanfossIconModeSelect::loop() {
-  if (climates_.empty())
+  if (this->climates_.empty())
     return;
-  int agg = climates_[0]->active_mode();
-  for (auto *c : climates_)
+  int agg = this->climates_[0]->active_mode();
+  for (auto *c : this->climates_)
     if (c->active_mode() != agg) {
       agg = -1;  // rooms disagree
       break;
     }
   std::string s = agg < 0 ? MIXED : MODE_NAMES[agg];
-  if (published_ && s == last_published_)
+  if (this->published_ && s == this->last_published_)
     return;  // publish only on change — loop() runs every tick
-  last_published_ = s;
-  published_ = true;
+  this->last_published_ = s;
+  this->published_ = true;
   this->publish_state(s);
 }
 
 void DanfossIconModeSelect::dump_config() {
   LOG_SELECT("", "Danfoss Icon All Rooms Mode", this);
-  ESP_LOGCONFIG(TAG, "  Rooms: %u", (unsigned) climates_.size());
+  ESP_LOGCONFIG(TAG, "  Rooms: %u", (unsigned) this->climates_.size());
 }
 
 }  // namespace danfoss_icon

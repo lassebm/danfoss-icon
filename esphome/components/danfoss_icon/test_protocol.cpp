@@ -63,6 +63,15 @@ int main() {
     expect(r2.found, "scan_frame recovers the good frame after a bad one");
   }
 
+  // format_output_channels: 1-indexed, comma-joined; "none" when empty.
+  {
+    expect(format_output_channels(0x0000) == "none", "format_output_channels(0) == \"none\"");
+    expect(format_output_channels(0x0005) == "#1, #3",  // bits 0 and 2 -> channels 1 and 3
+           "format_output_channels(0x0005) == \"#1, #3\"");
+    expect(format_output_channels(0x8000) == "#16",  // bit 15 -> channel 16
+           "format_output_channels(0x8000) == \"#16\"");
+  }
+
   printf(fails ? "\n%d FAIL(s)\n" : "\nall passed\n", fails);
   return fails ? 1 : 0;
 }

@@ -76,8 +76,9 @@ DanfossIconProblem = danfoss_icon_ns.class_(
 DiSensorDecode = danfoss_icon_ns.enum("DiSensorDecode")
 DiTextDecode = danfoss_icon_ns.enum("DiTextDecode")
 
-# Referenced by the generic sensor/text_sensor sub-platforms (the explicit fallback).
 CONF_DANFOSS_ICON_ID = "danfoss_icon_id"
+CONF_INDEX = "index"
+CONF_ATTRIBUTE = "attribute"
 
 # --- User-facing option names ---
 # Hub-level

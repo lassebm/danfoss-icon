@@ -9,47 +9,43 @@ namespace danfoss_icon {
 static const char *const TAG = "danfoss_icon.text_sensor";
 
 void DanfossIconTextSensor::setup() {
-  parent_->add_listener(this);
-  if (idx_ >= 0x31)
-    parent_->add_room(idx_);
-  else if (idx_ >= 0x01 && idx_ <= 0x03)
-    parent_->add_controller(idx_);
-  parent_->add_slow_attr(idx_, attr_);  // poll this attr (slow tier); tier/dedup resolved at build
+  this->parent_->add_listener(this);
+  if (this->idx_ >= 0x31)
+    this->parent_->add_room(this->idx_);
+  else if (this->idx_ >= 0x01 && this->idx_ <= 0x03)
+    this->parent_->add_controller(this->idx_);
+  this->parent_->add_slow_attr(this->idx_, this->attr_);  // poll this attr (slow tier); tier/dedup resolved at build
 }
 
 void DanfossIconTextSensor::on_attr(uint8_t idx, uint16_t attr_id, const uint8_t *data, size_t len) {
-  if (idx != idx_)
+  if (idx != this->idx_)
     return;
   // OUTPUTS spans three per-controller speed-category bitmaps (0x1020 SLOW / 0x1021 MEDIUM /
   // 0x1022 FAST). A room's outputs = the union; bit k = that controller's output k+1.
-  if (decode_ == DI_TEXT_OUTPUTS) {
+  if (this->decode_ == DI_TEXT_OUTPUTS) {
     if (len < 2)
       return;
     uint16_t bm = ((uint16_t) data[0] << 8) | data[1];
     if (attr_id == 0x1020)
-      out_slow_ = bm;
+      this->out_slow_ = bm;
     else if (attr_id == 0x1021)
-      out_med_ = bm;
+      this->out_med_ = bm;
     else if (attr_id == 0x1022)
-      out_fast_ = bm;
+      this->out_fast_ = bm;
     else
       return;
-    uint16_t all = out_slow_ | out_med_ | out_fast_;
-    std::string list;
-    // "#"-prefix each channel so a single value reads as a channel id, not a count
-    // (e.g. "#2" = output channel 2, never "2 outputs").
-    for (int b = 0; b < 16; b++)
-      if (all & (1 << b))
-        list += (list.empty() ? "" : ", ") + str_sprintf("#%d", b + 1);
-    std::string out = list.empty() ? "none" : list;
-    if (!this->has_state() || this->state != out)  // publish only on change (see sensor.cpp)
-      this->publish_state(out);
+    uint16_t all = this->out_slow_ | this->out_med_ | this->out_fast_;
+    // "#"-prefix each channel so a single value reads as a channel id, not a count (e.g. "#2" =
+    // output channel 2, never "2 outputs").
+    std::string list = format_output_channels(all);
+    if (!this->has_state() || this->state != list)  // publish only on change (see sensor.cpp)
+      this->publish_state(list);
     return;
   }
-  if (attr_id != attr_)
+  if (attr_id != this->attr_)
     return;
   std::string out;
-  switch (decode_) {
+  switch (this->decode_) {
     case DI_TEXT_VERSTR: {
       // [len][chars...][..]; chars are ASCII up to the prefix length or a NUL.
       if (len >= 1) {
@@ -118,7 +114,7 @@ void DanfossIconTextSensor::on_attr(uint8_t idx, uint16_t attr_id, const uint8_t
           {0x1000, "Secondary controller 1 missing"}, {0x2000, "Secondary controller 2 missing"},
           {0x4000, "Pt1000 short circuit"},           {0x8000, "Pt1000 open circuit"},
       };
-      if (decode_ == DI_TEXT_FAULT_ROOM) {
+      if (this->decode_ == DI_TEXT_FAULT_ROOM) {
         for (auto &b : ROOM_BITS)
           if (v & b.mask)
             out += (out.empty() ? "" : ", ") + std::string(b.name);
@@ -150,7 +146,7 @@ void DanfossIconTextSensor::on_attr(uint8_t idx, uint16_t attr_id, const uint8_t
   // rather than clobbering it. For ROOM firmware this can persist: the controller keeps it in RAM
   // only and refreshes it solely on the thermostat's RF announce, so after a controller reboot a
   // room reads blank until that thermostat re-announces (a battery reinsert triggers it).
-  if (decode_ == DI_TEXT_VERSTR && out.empty())
+  if (this->decode_ == DI_TEXT_VERSTR && out.empty())
     return;
   if (this->has_state() && this->state == out)
     return;  // publish only on change (see sensor.cpp) — slow-tier strings rarely move
@@ -159,7 +155,7 @@ void DanfossIconTextSensor::on_attr(uint8_t idx, uint16_t attr_id, const uint8_t
 
 void DanfossIconTextSensor::dump_config() {
   LOG_TEXT_SENSOR("", "Danfoss Icon Text Sensor", this);
-  ESP_LOGCONFIG(TAG, "  idx=0x%02X attr=0x%04X decode=%d", idx_, attr_, (int) decode_);
+  ESP_LOGCONFIG(TAG, "  idx=0x%02X attr=0x%04X decode=%d", this->idx_, this->attr_, (int) this->decode_);
 }
 
 }  // namespace danfoss_icon

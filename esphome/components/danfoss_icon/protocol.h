@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <string>
 
 namespace esphome {
 namespace danfoss_icon {
@@ -33,6 +34,13 @@ static const uint8_t DI_FRAME_MAX = 128;  // generous cap; observed up to ~61
 
 // 0x8000 = invalid / no-sensor / unconfigured sentinel for temp-class u16 values.
 static const uint16_t DI_TEMP_INVALID = 0x8000;
+
+static const uint16_t DI_ATTR_ROOM_MODE = 0x100A;       // room mode: 0=Home, 1=Away, 2=Sleep
+static const uint16_t DI_ATTR_ROOM_CONTROL = 0x100B;    // room control: 0=manual (HA owns the setpoint)
+static const uint16_t DI_ATTR_SETPOINT_HOME = 0x0509;   // setpoint for the Home preset (also OFF/HEAT)
+static const uint16_t DI_ATTR_SETPOINT_AWAY = 0x050A;   // setpoint for the Away preset
+static const uint16_t DI_ATTR_SETPOINT_SLEEP = 0x050B;  // setpoint for the Sleep preset
+static const uint16_t DI_ATTR_ERROR_CODE = 0x03F0;      // room/rail fault-code bitmask
 
 // CRC-16/MODBUS: init 0xFFFF, reflected poly 0xA001.
 inline uint16_t crc16_modbus(const uint8_t *data, size_t len) {
@@ -213,6 +221,19 @@ inline const char *product_id_name(uint16_t pid) {
 }
 
 inline bool product_is_wired(uint16_t pid) { return pid == 0x8020 || pid == 0x8021; }
+
+// Render an output-channel bitmap (bit k = actuator channel k+1) as a 1-indexed, comma-joined list
+// ("#1, #3, #7"), or "none" when no bit is set.
+inline std::string format_output_channels(uint16_t bits) {
+  std::string s;
+  for (int b = 0; b < 16; b++)
+    if (bits & (1 << b)) {
+      if (!s.empty())
+        s += ", ";
+      s += "#" + std::to_string(b + 1);
+    }
+  return s.empty() ? "none" : s;
+}
 
 // Result of scanning for one frame in a byte buffer.
 struct FrameScan {

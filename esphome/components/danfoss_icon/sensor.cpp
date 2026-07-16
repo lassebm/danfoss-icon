@@ -8,19 +8,19 @@ namespace danfoss_icon {
 static const char *const TAG = "danfoss_icon.sensor";
 
 void DanfossIconSensor::setup() {
-  parent_->add_listener(this);
-  if (idx_ >= 0x31)
-    parent_->add_room(idx_);
-  else if (idx_ >= 0x01 && idx_ <= 0x03)
-    parent_->add_controller(idx_);
-  parent_->add_slow_attr(idx_, attr_);  // poll this attr (slow tier); tier/dedup resolved at build
+  this->parent_->add_listener(this);
+  if (this->idx_ >= 0x31)
+    this->parent_->add_room(this->idx_);
+  else if (this->idx_ >= 0x01 && this->idx_ <= 0x03)
+    this->parent_->add_controller(this->idx_);
+  this->parent_->add_slow_attr(this->idx_, this->attr_);  // poll this attr (slow tier); tier/dedup resolved at build
 }
 
 void DanfossIconSensor::on_attr(uint8_t idx, uint16_t attr_id, const uint8_t *data, size_t len) {
-  if (idx != idx_ || attr_id != attr_)
+  if (idx != this->idx_ || attr_id != this->attr_)
     return;
   float val = NAN;
-  switch (decode_) {
+  switch (this->decode_) {
     case DI_DECODE_BATTERY:
       if (len >= 1) {
         uint8_t b = data[0];
@@ -53,7 +53,7 @@ void DanfossIconSensor::on_attr(uint8_t idx, uint16_t attr_id, const uint8_t *da
 
 void DanfossIconSensor::dump_config() {
   LOG_SENSOR("", "Danfoss Icon Sensor", this);
-  ESP_LOGCONFIG(TAG, "  idx=0x%02X attr=0x%04X decode=%d", idx_, attr_, (int) decode_);
+  ESP_LOGCONFIG(TAG, "  idx=0x%02X attr=0x%04X decode=%d", this->idx_, this->attr_, (int) this->decode_);
 }
 
 }  // namespace danfoss_icon

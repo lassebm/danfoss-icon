@@ -15,12 +15,12 @@ enum DiSensorDecode {
 };
 
 // Generic numeric sensor bound to one (idx, attr_id).
-class DanfossIconSensor : public sensor::Sensor, public Component, public DanfossIconListener {
+class DanfossIconSensor final : public sensor::Sensor, public Component, public DanfossIconListener {
  public:
-  void set_parent(DanfossIconHub *parent) { parent_ = parent; }
-  void set_index(uint8_t idx) { idx_ = idx; }
-  void set_attribute(uint16_t attr) { attr_ = attr; }
-  void set_decode(DiSensorDecode d) { decode_ = d; }
+  void set_parent(DanfossIconHub *parent) { this->parent_ = parent; }
+  void set_index(uint8_t idx) { this->idx_ = idx; }
+  void set_attribute(uint16_t attr) { this->attr_ = attr; }
+  void set_decode(DiSensorDecode d) { this->decode_ = d; }
 
   void setup() override;
   void dump_config() override;

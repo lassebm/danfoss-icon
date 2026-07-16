@@ -3,12 +3,16 @@ from esphome.components import text_sensor
 import esphome.config_validation as cv
 from esphome.const import CONF_TYPE
 
-from . import CONF_DANFOSS_ICON_ID, DanfossIconHub, DanfossIconTextSensor, DiTextDecode
+from . import (
+    CONF_ATTRIBUTE,
+    CONF_DANFOSS_ICON_ID,
+    CONF_INDEX,
+    DanfossIconHub,
+    DanfossIconTextSensor,
+    DiTextDecode,
+)
 
 DEPENDENCIES = ["danfoss_icon"]
-
-CONF_INDEX = "index"
-CONF_ATTRIBUTE = "attribute"
 
 DECODE = {
     "verstr": DiTextDecode.DI_TEXT_VERSTR,

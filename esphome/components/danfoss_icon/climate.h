@@ -22,10 +22,10 @@ namespace danfoss_icon {
 // if a prior OFF left Home parked at frost, so choosing Home (per room or via All Rooms Mode) turns
 // the room back on. The firmware only applies 0x100A when the room is manual (0x100B==0), which the
 // hub keeps enforced for every room.
-class DanfossIconClimate : public climate::Climate, public Component, public DanfossIconListener {
+class DanfossIconClimate final : public climate::Climate, public Component, public DanfossIconListener {
  public:
-  void set_parent(DanfossIconHub *parent) { parent_ = parent; }
-  void set_room_index(uint8_t idx) { idx_ = idx; }
+  void set_parent(DanfossIconHub *parent) { this->parent_ = parent; }
+  void set_room_index(uint8_t idx) { this->idx_ = idx; }
 
   void setup() override;
   void dump_config() override;
@@ -38,7 +38,7 @@ class DanfossIconClimate : public climate::Climate, public Component, public Dan
   void set_preset_mode(uint8_t m);
   void set_off();
   void set_heat();
-  int active_mode() const { return this->mode == climate::CLIMATE_MODE_OFF ? 3 : room_mode_; }
+  int active_mode() const { return this->mode == climate::CLIMATE_MODE_OFF ? 3 : this->room_mode_; }
 
  protected:
   // current_temperature follows the room's regulation sensor (0x030A): floor temp (0x0304) for
@@ -50,7 +50,7 @@ class DanfossIconClimate : public climate::Climate, public Component, public Dan
   void set_saved_target_(float t);  // update + persist (NVS) the restore-on-HEAT setpoint
   void set_limit_(float &slot, ESPPreferenceObject &pref, float v);  // update + persist a min/max bound
   // At/below the room's frost floor (0x0507) == effectively off. Small hysteresis avoids float jitter.
-  bool at_frost_(float t) const { return t <= room_min_ + 0.05f; }
+  bool at_frost_(float t) const { return t <= this->room_min_ + 0.05f; }
   // Presets: the attribute / stored value of the currently active room mode (0x100A).
   uint16_t active_attr_() const;         // 0x0509 (Home) / 0x050A (Away) / 0x050B (Sleep)
   float active_sp_() const;              // stored value of the active preset (NAN until first poll)
