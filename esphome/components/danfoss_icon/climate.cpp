@@ -287,6 +287,10 @@ void DanfossIconClimate::publish_if_changed_() {
       this->preset == this->last_preset_ && same(this->target_temperature, this->last_target_) &&
       same(this->current_temperature, this->last_current_))
     return;
+  // Setpoint mirror rides this gate, but only on a real target move — the gate also fires for
+  // mode/action/current, and the sensor would re-emit an unchanged value on each of those.
+  if (this->setpoint_sensor_ != nullptr && !same(this->target_temperature, this->last_target_))
+    this->setpoint_sensor_->publish_state(this->target_temperature);
   this->last_mode_ = this->mode;
   this->last_action_ = this->action;
   this->last_preset_ = this->preset;

@@ -2,6 +2,7 @@
 #include "danfoss_icon.h"
 #include "esphome/core/component.h"
 #include "esphome/components/climate/climate.h"
+#include "esphome/components/sensor/sensor.h"
 #include "esphome/core/preferences.h"
 #include <cmath>
 
@@ -26,6 +27,9 @@ class DanfossIconClimate final : public climate::Climate, public Component, publ
  public:
   void set_parent(DanfossIconHub *parent) { this->parent_ = parent; }
   void set_room_index(uint8_t idx) { this->idx_ = idx; }
+  // Optional mirror of target_temperature as a sensor entity (room `setpoint:`), republished from
+  // publish_if_changed_() so the two can't drift.
+  void set_setpoint_sensor(sensor::Sensor *s) { this->setpoint_sensor_ = s; }
 
   void setup() override;
   void dump_config() override;
@@ -62,6 +66,7 @@ class DanfossIconClimate final : public climate::Climate, public Component, publ
 
   DanfossIconHub *parent_{nullptr};
   uint8_t idx_{0};
+  sensor::Sensor *setpoint_sensor_{nullptr};  // optional target_temperature mirror (room `setpoint:`)
   // Mode + the three preset setpoints (the target side). saved_target_ is the persisted Home value
   // restored when leaving OFF.
   uint8_t room_mode_{0};     // 0x100A room mode: 0=Home, 1=Away, 2=Sleep (the active preset)

@@ -101,6 +101,8 @@ CONF_SW_VERSION = "software_version"
 CONF_SERIAL = "serial"
 CONF_FLOOR = "floor"
 CONF_OUTPUTS = "outputs"
+CONF_ROOM_TEMPERATURE = "room_temperature"
+CONF_SETPOINT = "setpoint"
 # Editable per-room setpoint min/max (0x0507/0x0508)
 CONF_SETPOINT_LIMITS = "setpoint_limits"
 CONF_FAULT = "fault"
@@ -115,6 +117,7 @@ CONF_ROOMTEMP_ID = "roomtemp_id"
 CONF_FLOOR_ID = "floor_id"
 CONF_FLOOR_MODE_ID = "floor_mode_id"
 CONF_OUTPUTS_ID = "outputs_id"
+CONF_SETPOINT_ID = "setpoint_id"
 CONF_SETPOINT_MIN_ID = "setpoint_min_id"
 CONF_SETPOINT_MAX_ID = "setpoint_max_id"
 CONF_FLOOR_MIN_ID = "floor_min_id"
@@ -190,6 +193,9 @@ ROOM_SCHEMA = cv.Schema(
     {
         # Control
         cv.GenerateID(CONF_CLIMATE_ID): cv.declare_id(DanfossIconClimate),
+        # Live readings — sensor mirrors of the climate's current/target
+        cv.GenerateID(CONF_ROOMTEMP_ID): cv.declare_id(DanfossIconSensor),
+        cv.GenerateID(CONF_SETPOINT_ID): cv.declare_id(sensor_.Sensor),
         # Config (editable numbers)
         cv.GenerateID(CONF_SETPOINT_MIN_ID): cv.declare_id(DanfossIconNumber),
         cv.GenerateID(CONF_SETPOINT_MAX_ID): cv.declare_id(DanfossIconNumber),
@@ -202,7 +208,6 @@ ROOM_SCHEMA = cv.Schema(
         cv.GenerateID(CONF_ROOM_PROBLEM_ID): cv.declare_id(DanfossIconProblem),
         # Floor feature set (floor: true)
         cv.GenerateID(CONF_FLOOR_ID): cv.declare_id(DanfossIconSensor),
-        cv.GenerateID(CONF_ROOMTEMP_ID): cv.declare_id(DanfossIconSensor),
         cv.GenerateID(CONF_FLOOR_MODE_ID): cv.declare_id(DanfossIconTextSensor),
         cv.GenerateID(CONF_FLOOR_MIN_ID): cv.declare_id(DanfossIconNumber),
         cv.GenerateID(CONF_FLOOR_MAX_ID): cv.declare_id(DanfossIconNumber),
@@ -215,6 +220,11 @@ ROOM_SCHEMA = cv.Schema(
         # entities group under it and use bare names (the device supplies the room label).
         cv.Optional(CONF_DEVICE_ID): cv.use_id(Device),
         # Entity toggles — same order as the entities are created in to_code().
+        # Air temp and active setpoint as standalone sensors — they duplicate the climate's
+        # current/target on purpose, since Home Assistant keeps long-term history for sensors but
+        # not for climate entities. Default on.
+        cv.Optional(CONF_ROOM_TEMPERATURE, default=True): cv.boolean,
+        cv.Optional(CONF_SETPOINT, default=True): cv.boolean,
         # Editable setpoint min/max (0x0507/0x0508) as two config Number entities. These bound the
         # room's allowed setpoint (and the climate's slider range/clamp). Default on.
         cv.Optional(CONF_SETPOINT_LIMITS, default=True): cv.boolean,
@@ -321,13 +331,22 @@ _GEN_BATTERY_SCHEMA = sensor_.sensor_schema(
     state_class=STATE_CLASS_MEASUREMENT,
     entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
 ).extend(cv.COMPONENT_SCHEMA)
-_GEN_FLOOR_SCHEMA = sensor_.sensor_schema(
+# Shared by the room air (0x0300) and floor (0x0304) temperature sensors.
+_GEN_TEMP_SCHEMA = sensor_.sensor_schema(
     DanfossIconSensor,
     unit_of_measurement=UNIT_CELSIUS,
     accuracy_decimals=1,
     device_class=DEVICE_CLASS_TEMPERATURE,
     state_class=STATE_CLASS_MEASUREMENT,
 ).extend(cv.COMPONENT_SCHEMA)
+# Setpoint mirror: a plain core Sensor, not a Component — the climate pushes into it, so there's no
+# attribute binding and no poll of its own.
+_GEN_SETPOINT_SCHEMA = sensor_.sensor_schema(
+    unit_of_measurement=UNIT_CELSIUS,
+    accuracy_decimals=1,
+    device_class=DEVICE_CLASS_TEMPERATURE,
+    state_class=STATE_CLASS_MEASUREMENT,
+)
 _GEN_TEXT_SCHEMA = text_sensor_.text_sensor_schema(
     DanfossIconTextSensor, entity_category=ENTITY_CATEGORY_DIAGNOSTIC
 ).extend(cv.COMPONENT_SCHEMA)
@@ -430,22 +449,10 @@ async def _new_room_setpoint_limit(
     cg.add(var.set_attribute(attribute))
 
 
-async def _new_room_floor(hub, room, name, device_id):
-    cfg = _GEN_FLOOR_SCHEMA(_cfg(room[CONF_FLOOR_ID], name, device_id))
-    var = await sensor_.new_sensor(cfg)
-    await cg.register_component(var, cfg)
-    cg.add(var.set_parent(hub))
-    cg.add(var.set_index(_room_index(room)))
-    cg.add(var.set_attribute(ROOM_FLOOR_TEMP_ATTR))
-    cg.add(var.set_decode(DiSensorDecode.DI_DECODE_TEMP))
-    # The sensor's setup() registers 0x0304 (slow); the floor feature set upgrades it to fast.
-
-
 async def _new_room_temp(hub, room, name, device_id):
-    # Standalone air-temp (0x0300) sensor. The climate's current_temperature shows the *regulated*
-    # sensor (floor in Floor mode), so in Floor mode the air reading would otherwise be invisible —
-    # this keeps it available, mirroring the app's "advanced readings" (both sensors always shown).
-    cfg = _GEN_FLOOR_SCHEMA(_cfg(room[CONF_ROOMTEMP_ID], name, device_id))
+    # Standalone air-temp (0x0300) sensor. Also where the air reading stays visible in Floor mode,
+    # since there the climate's current_temperature shows the floor probe instead.
+    cfg = _GEN_TEMP_SCHEMA(_cfg(room[CONF_ROOMTEMP_ID], name, device_id))
     var = await sensor_.new_sensor(cfg)
     await cg.register_component(var, cfg)
     cg.add(var.set_parent(hub))
@@ -454,6 +461,25 @@ async def _new_room_temp(hub, room, name, device_id):
     cg.add(
         var.set_decode(DiSensorDecode.DI_DECODE_TEMP)
     )  # 0x0300 already in the fast poll set
+
+
+async def _new_room_setpoint(room, name, device_id, clim):
+    # Mirror of the climate's target — the setpoint of the active preset (Home/Away/Sleep). Fed by
+    # the climate rather than polled, so it can't drift from the target.
+    cfg = _GEN_SETPOINT_SCHEMA(_cfg(room[CONF_SETPOINT_ID], name, device_id))
+    var = await sensor_.new_sensor(cfg)
+    cg.add(clim.set_setpoint_sensor(var))
+
+
+async def _new_room_floor(hub, room, name, device_id):
+    cfg = _GEN_TEMP_SCHEMA(_cfg(room[CONF_FLOOR_ID], name, device_id))
+    var = await sensor_.new_sensor(cfg)
+    await cg.register_component(var, cfg)
+    cg.add(var.set_parent(hub))
+    cg.add(var.set_index(_room_index(room)))
+    cg.add(var.set_attribute(ROOM_FLOOR_TEMP_ATTR))
+    cg.add(var.set_decode(DiSensorDecode.DI_DECODE_TEMP))
+    # The sensor's setup() registers 0x0304 (slow); the floor feature set upgrades it to fast.
 
 
 async def _new_room_fault(hub, room, prefix, device_id):
@@ -516,7 +542,12 @@ async def to_code(config):
         # otherwise they're prefixed with the room name and the climate carries it.
         prefix = "" if dev is not None else f"{room[CONF_NAME]} "
         climate_name = "" if dev is not None else room[CONF_NAME]
-        room_climates.append(await _new_room_climate(var, room, climate_name, dev))
+        clim = await _new_room_climate(var, room, climate_name, dev)
+        room_climates.append(clim)
+        if room[CONF_ROOM_TEMPERATURE]:
+            await _new_room_temp(var, room, f"{prefix}Room Temperature", dev)
+        if room[CONF_SETPOINT]:
+            await _new_room_setpoint(room, f"{prefix}Setpoint", dev, clim)
         if room[CONF_SETPOINT_LIMITS]:
             await _new_room_setpoint_limit(
                 var,
@@ -581,8 +612,6 @@ async def to_code(config):
             # by the Floor Sensor Mode text sensor below; both are thus gated to floor rooms.
             cg.add(var.add_fast_attr(idx, ROOM_FLOOR_TEMP_ATTR))
             await _new_room_floor(var, room, f"{prefix}Floor", dev)
-            # Air temp as its own sensor so Floor mode (climate current = floor) doesn't hide it.
-            await _new_room_temp(var, room, f"{prefix}Room Temperature", dev)
             await _new_text(
                 var,
                 room[CONF_FLOOR_MODE_ID],

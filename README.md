@@ -39,6 +39,8 @@ controller's built-in weekly schedule is not used).
 - **Home / Away / Sleep presets** — the controller's native room modes, each with its own setpoint;
   plus a hub-level **All Rooms Mode** selector that sets every room at once
 - **Setpoint writes** from Home Assistant, range-clamped to each room's configured limits
+- **Long-term statistics** — per-room Room Temperature and Setpoint sensors, since Home Assistant
+  keeps long-term history for sensors but not for climate entities
 - **Floor-heating aware** — tracks the room's regulation sensor (air / floor / dual) per room
 - **Per-room diagnostics** — battery level, thermostat model & firmware, assigned actuator output
   channels, and fault (e.g. thermostat missing, floor-sensor short / disconnected)

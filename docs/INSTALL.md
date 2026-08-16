@@ -128,9 +128,15 @@ is always created; the toggles above hide the rest if you don't want them.
 | `controller` | `1` | rail position: 1 = primary (this node), 2/3 = a secondary |
 | `device_id` | — | optional HA sub-device to group the room's entities under |
 | `floor` | `false` | room has a floor sensor → adds floor temp, floor mode, floor min/max |
+| `room_temperature` | `true` | air-temperature sensor |
+| `setpoint` | `true` | setpoint sensor |
 | `setpoint_limits` | `true` | expose editable Setpoint Min/Max number entities |
 | `battery`, `model`, `firmware`, `outputs` | `true` | which diagnostic entities to create |
 | `fault` | `true` | room Fault text **and** Problem alarm |
+
+Room Temperature and Setpoint duplicate what the climate already shows, on purpose: Home Assistant
+keeps long-term history for sensors but not for climate entities. Room Temperature is the *air*
+reading, which in Floor mode the climate replaces with the floor probe.
 
 #### Per secondary controller (`secondary_controllers:`)
 
